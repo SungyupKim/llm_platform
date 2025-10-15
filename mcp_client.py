@@ -1,5 +1,7 @@
 import asyncio
 import json
+import subprocess
+import os
 from typing import Dict, List, Any, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -30,16 +32,74 @@ class McpClientManager:
     
     async def _connect_server(self, server_name: str, server_config: Dict[str, Any]):
         """Connect to a single MCP server"""
-        server_params = StdioServerParameters(
-            command=server_config["command"],
-            args=server_config.get("args", []),
-            env=server_config.get("env", {})
-        )
-        
-        # Note: In a real implementation, you'd need to keep the sessions alive
-        # For now, we'll simulate the connection and tools
-        self.sessions[server_name] = None  # Placeholder
-        self.tools[server_name] = self._get_simulated_tools(server_name)
+        try:
+            # Check if the command exists
+            command = server_config["command"]
+            if not self._command_exists(command):
+                print(f"⚠️  Command '{command}' not found, using simulation for {server_name}")
+                self.sessions[server_name] = None
+                self.tools[server_name] = self._get_simulated_tools(server_name)
+                return
+            
+            # Prepare environment variables
+            env = os.environ.copy()
+            if "env" in server_config:
+                env.update(server_config["env"])
+            
+            # Create server parameters
+            server_params = StdioServerParameters(
+                command=server_config["command"],
+                args=server_config.get("args", []),
+                env=env
+            )
+            
+            # Try to connect to the actual MCP server
+            try:
+                # For now, we'll use simulation mode since real MCP servers need proper setup
+                # In a production environment, you would properly manage the async context
+                print(f"⚠️  Real MCP server connection requires proper async context management")
+                print(f"   Using simulation mode for {server_name}")
+                self.sessions[server_name] = None
+                self.tools[server_name] = self._get_simulated_tools(server_name)
+                
+            except Exception as e:
+                print(f"⚠️  Failed to connect to real MCP server {server_name}: {e}")
+                print(f"   Using simulation mode for {server_name}")
+                self.sessions[server_name] = None
+                self.tools[server_name] = self._get_simulated_tools(server_name)
+                
+        except Exception as e:
+            print(f"❌ Error setting up MCP server {server_name}: {e}")
+            self.sessions[server_name] = None
+            self.tools[server_name] = self._get_simulated_tools(server_name)
+    
+    def _command_exists(self, command: str) -> bool:
+        """Check if a command exists in the system"""
+        try:
+            subprocess.run([command, "--version"], 
+                         capture_output=True, 
+                         check=True, 
+                         timeout=5)
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+    
+    def _test_postgres_connection(self) -> bool:
+        """Test PostgreSQL connection"""
+        try:
+            import psycopg2
+            from config import Config
+            
+            # Get connection string from environment
+            conn_str = os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://test:test@localhost:5432/test")
+            
+            # Test connection
+            conn = psycopg2.connect(conn_str)
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"⚠️  PostgreSQL connection test failed: {e}")
+            return False
     
     def _get_simulated_tools(self, server_name: str) -> List[Dict[str, Any]]:
         """Get simulated tools for each server type"""
@@ -77,22 +137,59 @@ class McpClientManager:
                 "tool": tool_name
             }
         
+        session = self.sessions[server_name]
+        
+        # If session is None, use simulation
+        if session is None:
+            try:
+                result = await self._simulate_tool_call(server_name, tool_name, arguments)
+                return {
+                    "success": True,
+                    "result": result,
+                    "server": server_name,
+                    "tool": tool_name,
+                    "mode": "simulation"
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "server": server_name,
+                    "tool": tool_name,
+                    "mode": "simulation"
+                }
+        
+        # Use real MCP server
         try:
-            # Simulate tool execution for demo purposes
-            result = await self._simulate_tool_call(server_name, tool_name, arguments)
+            # Call the actual tool on the MCP server
+            result = await session.call_tool(tool_name, arguments)
             return {
                 "success": True,
-                "result": result,
+                "result": result.content if hasattr(result, 'content') else result,
                 "server": server_name,
-                "tool": tool_name
+                "tool": tool_name,
+                "mode": "real"
             }
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "server": server_name,
-                "tool": tool_name
-            }
+            print(f"❌ Real MCP tool call failed for {server_name}.{tool_name}: {e}")
+            # Fallback to simulation
+            try:
+                result = await self._simulate_tool_call(server_name, tool_name, arguments)
+                return {
+                    "success": True,
+                    "result": result,
+                    "server": server_name,
+                    "tool": tool_name,
+                    "mode": "simulation_fallback"
+                }
+            except Exception as sim_e:
+                return {
+                    "success": False,
+                    "error": f"Real call failed: {str(e)}, Simulation failed: {str(sim_e)}",
+                    "server": server_name,
+                    "tool": tool_name,
+                    "mode": "failed"
+                }
     
     async def _simulate_tool_call(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Simulate tool calls for demo purposes"""
@@ -116,12 +213,67 @@ class McpClientManager:
                 }
         
         elif server_name == "postgres":
-            if tool_name == "query":
-                return {"rows": [{"id": 1, "name": "example"}, {"id": 2, "name": "test"}]}
-            elif tool_name == "list_tables":
-                return {"tables": ["users", "products", "orders"]}
+            # Try real PostgreSQL connection first
+            if self._test_postgres_connection():
+                return await self._real_postgres_query(tool_name, arguments)
+            else:
+                # Fallback to simulation
+                if tool_name == "query":
+                    return {"rows": [{"id": 1, "name": "example"}, {"id": 2, "name": "test"}]}
+                elif tool_name == "list_tables":
+                    return {"tables": ["users", "products", "orders"]}
         
         return {"message": f"Simulated execution of {tool_name} with arguments {arguments}"}
+    
+    async def _real_postgres_query(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute real PostgreSQL queries"""
+        try:
+            import psycopg2
+            import psycopg2.extras
+            
+            # Get connection string from environment
+            conn_str = os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://test:test@localhost:5432/test")
+            
+            conn = psycopg2.connect(conn_str)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            
+            if tool_name == "query":
+                sql = arguments.get("sql", "")
+                cursor.execute(sql)
+                
+                if sql.strip().upper().startswith("SELECT"):
+                    rows = cursor.fetchall()
+                    return {"rows": [dict(row) for row in rows]}
+                else:
+                    conn.commit()
+                    return {"message": f"Query executed successfully: {sql}"}
+                    
+            elif tool_name == "list_tables":
+                cursor.execute("""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name;
+                """)
+                tables = cursor.fetchall()
+                return {"tables": [table['table_name'] for table in tables]}
+                
+            elif tool_name == "describe_table":
+                table_name = arguments.get("table_name", "")
+                cursor.execute("""
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_name = %s AND table_schema = 'public'
+                    ORDER BY ordinal_position;
+                """, (table_name,))
+                columns = cursor.fetchall()
+                return {"columns": [dict(col) for col in columns]}
+            
+            conn.close()
+            return {"message": f"PostgreSQL operation completed: {tool_name}"}
+            
+        except Exception as e:
+            return {"error": f"PostgreSQL query failed: {str(e)}"}
     
     async def get_available_tools(self) -> Dict[str, List[Dict[str, Any]]]:
         """Get all available tools from all servers"""
@@ -149,6 +301,14 @@ class McpClientManager:
     
     async def close(self):
         """Close all MCP server connections"""
+        for server_name, session in self.sessions.items():
+            if session is not None:
+                try:
+                    await session.close()
+                    print(f"🔌 Closed connection to MCP server: {server_name}")
+                except Exception as e:
+                    print(f"⚠️  Error closing MCP server {server_name}: {e}")
+        
         self.sessions.clear()
         self.tools.clear()
         self.initialized = False

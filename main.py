@@ -1,64 +1,67 @@
-#!/usr/bin/env python3
-"""
-LangChain ToolNode-based agent runner
-"""
-
 import asyncio
 import sys
-from typing import Optional
-from agent import LangChainToolAgent
+from typing import List
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from streaming_agent import StreamingAgent
+from bedrock_client import bedrock_client
 from config import Config
 
-class LangChainToolRunner:
-    """Main LangChain ToolNode application runner"""
+class StreamingMain:
+    """Main class for streaming agent interaction"""
     
     def __init__(self):
-        self.agent = LangChainToolAgent()
-        self.conversation_history = []
+        self.agent = StreamingAgent()
+        self.conversation_history: List[BaseMessage] = []
     
     async def run_interactive(self):
-        """Run the agent in interactive mode"""
-        print("🤖 LangChain ToolNode Agent Started")
-        print("=" * 50)
-        print("This agent uses LangChain's ToolNode for proper tool integration.")
-        print("You can ask general questions or request specific actions.")
-        print("\nExamples:")
-        print("  - 'Hello, how are you?' (general chat)")
-        print("  - 'What is machine learning?' (explanations)")
-        print("  - 'List files in current directory' (file operations)")
-        print("  - 'Search for latest AI news' (web search)")
-        print("  - 'Create a file called test.txt with hello world' (file creation)")
-        print("\nType 'quit' or 'exit' to stop the agent")
+        """Run interactive mode with streaming"""
+        print("🚀 Streaming LLM Agent Started!")
+        print("Type 'exit' or 'quit' to stop, 'clear' to clear history")
         print("=" * 50)
         
         while True:
             try:
+                # Get user input
                 user_input = input("\n👤 You: ").strip()
                 
-                if user_input.lower() in ['quit', 'exit', 'q']:
-                    print("👋 Goodbye!")
+                if user_input.lower() in ['exit', 'quit']:
+                    print("\n👋 Goodbye!")
                     break
+                
+                if user_input.lower() == 'clear':
+                    self.conversation_history = []
+                    print("🧹 Conversation history cleared!")
+                    continue
                 
                 if not user_input:
                     continue
                 
                 print("\n🤖 Agent: ", end="", flush=True)
                 
-                # Run the agent
-                result = await self.agent.run(user_input, self.conversation_history)
+                # Run the agent with streaming
+                response_text = ""
+                async for update in self.agent.run_streaming(user_input, self.conversation_history):
+                    if update["type"] == "step":
+                        print(f"\n{update['message']}")
+                        if update['details']:
+                            print(f"   {update['details']}")
+                    elif update["type"] == "stream":
+                        # Stream characters in real-time
+                        print(update["chunk"], end="", flush=True)
+                        response_text += update["chunk"]
+                    elif update["type"] == "response" or update["type"] == "response_complete":
+                        if update["type"] == "response":
+                            print(f"\n{update['message']}")
+                            response_text = update['message']
+                        if update["used_tools"]:
+                            print("\n🔧 (Used tools to complete this request)")
+                    elif update["type"] == "error":
+                        print(f"\n❌ {update['message']}")
+                        response_text = update['message']
                 
-                # Display response
-                if result["success"]:
-                    print(result["response"])
-                    
-                    # Show tool usage indicator
-                    if result["used_tools"]:
-                        print("🔧 (Used LangChain ToolNode to complete this request)")
-                    
-                    # Update conversation history
-                    self.conversation_history = result["messages"]
-                else:
-                    print(f"❌ Error: {result['error']}")
+                # Update conversation history
+                self.conversation_history.append(HumanMessage(content=user_input))
+                self.conversation_history.append(AIMessage(content=update.get("message", "")))
                 
             except KeyboardInterrupt:
                 print("\n\n👋 Goodbye!")
@@ -67,54 +70,61 @@ class LangChainToolRunner:
                 print(f"\n❌ Error: {e}")
     
     async def run_single_message(self, message: str):
-        """Run the agent for a single message"""
+        """Run a single message with streaming"""
         print(f"🤖 Processing: {message}")
         print("=" * 50)
         
-        result = await self.agent.run(message)
-        
-        if result["success"]:
-            print(f"🤖 Response: {result['response']}")
-            if result["used_tools"]:
-                print("🔧 (Used LangChain ToolNode to complete this request)")
-        else:
-            print(f"❌ Error: {result['error']}")
-        
-        return result
+        response_text = ""
+        async for update in self.agent.run_streaming(message, self.conversation_history):
+            if update["type"] == "step":
+                print(f"{update['message']}")
+                if update['details']:
+                    print(f"   {update['details']}")
+            elif update["type"] == "stream":
+                # Stream characters in real-time
+                print(update["chunk"], end="", flush=True)
+                response_text += update["chunk"]
+            elif update["type"] == "response" or update["type"] == "response_complete":
+                if update["type"] == "response":
+                    print(f"\n🤖 Response: {update['message']}")
+                    response_text = update['message']
+                if update["used_tools"]:
+                    print("\n🔧 (Used tools to complete this request)")
+            elif update["type"] == "error":
+                print(f"\n❌ Error: {update['message']}")
+                response_text = update['message']
 
 async def main():
     """Main entry point"""
-    runner = LangChainToolRunner()
+    try:
+        # Initialize Bedrock client
+        print("✅ Initialized ChatBedrock")
+        print("✅ AWS credentials verified")
+        
+        # Create and run the streaming main
+        streaming_main = StreamingMain()
+        
+        if len(sys.argv) > 1:
+            # Single message mode
+            message = " ".join(sys.argv[1:])
+            await streaming_main.run_single_message(message)
+        else:
+            # Interactive mode
+            await streaming_main.run_interactive()
     
-    # Check command line arguments
-    if len(sys.argv) > 1:
-        # Single message mode
-        message = " ".join(sys.argv[1:])
-        await runner.run_single_message(message)
-    else:
-        # Interactive mode
-        await runner.run_interactive()
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return 1
+    
+    finally:
+        # Clean up
+        try:
+            await streaming_main.agent.close()
+        except:
+            pass
+    
+    return 0
 
 if __name__ == "__main__":
-    # Check if AWS credentials are configured
-    try:
-        import boto3
-        from config import Config
-        # Test AWS credentials
-        aws_config = Config.get_aws_config()
-        sts_client = boto3.client('sts', **aws_config)
-        sts_client.get_caller_identity()
-        print("✅ AWS credentials verified")
-    except Exception as e:
-        print(f"❌ AWS credentials not configured properly: {e}")
-        print("   Please check your AWS credentials in .env file")
-        sys.exit(1)
-    
-    # Run the application
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-    except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        sys.exit(1)
+    exit_code = asyncio.run(main())
+    sys.exit(exit_code)

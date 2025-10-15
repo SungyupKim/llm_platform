@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """
-Main application runner for the LangGraph-based MCP Agent
+LangChain ToolNode-based agent runner
 """
 
 import asyncio
 import sys
 from typing import Optional
-from langgraph_agent import LangGraphAgent
+from agent import LangChainToolAgent
 from config import Config
 
-class AgentRunner:
-    """Main application runner"""
+class LangChainToolRunner:
+    """Main LangChain ToolNode application runner"""
     
     def __init__(self):
-        self.agent = LangGraphAgent()
+        self.agent = LangChainToolAgent()
+        self.conversation_history = []
     
     async def run_interactive(self):
         """Run the agent in interactive mode"""
-        print("🤖 LangGraph MCP Agent Started")
+        print("🤖 LangChain ToolNode Agent Started")
         print("=" * 50)
-        print("Available workers:")
-        for worker_name in ["filesystem_worker", "search_worker", "database_worker", "aws_worker"]:
-            print(f"  - {worker_name}")
+        print("This agent uses LangChain's ToolNode for proper tool integration.")
+        print("You can ask general questions or request specific actions.")
+        print("\nExamples:")
+        print("  - 'Hello, how are you?' (general chat)")
+        print("  - 'What is machine learning?' (explanations)")
+        print("  - 'List files in current directory' (file operations)")
+        print("  - 'Search for latest AI news' (web search)")
+        print("  - 'Create a file called test.txt with hello world' (file creation)")
         print("\nType 'quit' or 'exit' to stop the agent")
         print("=" * 50)
         
@@ -36,25 +42,23 @@ class AgentRunner:
                 if not user_input:
                     continue
                 
-                print("\n🤖 Agent: Processing your request...")
+                print("\n🤖 Agent: ", end="", flush=True)
                 
                 # Run the agent
-                result = await self.agent.run(user_input)
+                result = await self.agent.run(user_input, self.conversation_history)
                 
-                # Display results
+                # Display response
                 if result["success"]:
-                    print(f"\n✅ Task completed in {result['iterations']} iterations")
-                    if result["final_result"]:
-                        print(f"\n📋 Result:\n{result['final_result']}")
+                    print(result["response"])
+                    
+                    # Show tool usage indicator
+                    if result["used_tools"]:
+                        print("🔧 (Used LangChain ToolNode to complete this request)")
+                    
+                    # Update conversation history
+                    self.conversation_history = result["messages"]
                 else:
-                    print(f"\n❌ Task failed: {result['error']}")
-                
-                # Show conversation history
-                if result["messages"]:
-                    print(f"\n💬 Conversation:")
-                    for msg in result["messages"][-3:]:  # Show last 3 messages
-                        role = "👤 User" if msg.__class__.__name__ == "HumanMessage" else "🤖 Agent"
-                        print(f"{role}: {msg.content[:200]}{'...' if len(msg.content) > 200 else ''}")
+                    print(f"❌ Error: {result['error']}")
                 
             except KeyboardInterrupt:
                 print("\n\n👋 Goodbye!")
@@ -62,31 +66,31 @@ class AgentRunner:
             except Exception as e:
                 print(f"\n❌ Error: {e}")
     
-    async def run_single_task(self, task: str):
-        """Run the agent for a single task"""
-        print(f"🤖 Running task: {task}")
+    async def run_single_message(self, message: str):
+        """Run the agent for a single message"""
+        print(f"🤖 Processing: {message}")
         print("=" * 50)
         
-        result = await self.agent.run(task)
+        result = await self.agent.run(message)
         
         if result["success"]:
-            print(f"✅ Task completed in {result['iterations']} iterations")
-            if result["final_result"]:
-                print(f"\n📋 Result:\n{result['final_result']}")
+            print(f"🤖 Response: {result['response']}")
+            if result["used_tools"]:
+                print("🔧 (Used LangChain ToolNode to complete this request)")
         else:
-            print(f"❌ Task failed: {result['error']}")
+            print(f"❌ Error: {result['error']}")
         
         return result
 
 async def main():
     """Main entry point"""
-    runner = AgentRunner()
+    runner = LangChainToolRunner()
     
     # Check command line arguments
     if len(sys.argv) > 1:
-        # Single task mode
-        task = " ".join(sys.argv[1:])
-        await runner.run_single_task(task)
+        # Single message mode
+        message = " ".join(sys.argv[1:])
+        await runner.run_single_message(message)
     else:
         # Interactive mode
         await runner.run_interactive()
@@ -103,7 +107,7 @@ if __name__ == "__main__":
         print("✅ AWS credentials verified")
     except Exception as e:
         print(f"❌ AWS credentials not configured properly: {e}")
-        print("   Please check your AWS credentials in config.py")
+        print("   Please check your AWS credentials in .env file")
         sys.exit(1)
     
     # Run the application

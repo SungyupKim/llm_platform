@@ -7,9 +7,22 @@ import asyncio
 import json
 import uvicorn
 import os
+import logging
 from streaming_agent import StreamingAgent
 from bedrock_client import bedrock_client
 from config import Config
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Change to DEBUG to see more details
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler('app.log')  # File output
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="LLM Agent API", description="Streaming LLM Agent with Tool Support")
 
@@ -32,12 +45,12 @@ async def startup_event():
     """Initialize the agent on startup"""
     global agent
     try:
-        print("✅ Initializing ChatBedrock...")
-        print("✅ AWS credentials verified")
+        logger.info("✅ Initializing ChatBedrock...")
+        logger.info("✅ AWS credentials verified")
         agent = StreamingAgent()
-        print("🚀 Agent initialized successfully")
+        logger.info("🚀 Agent initialized successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize agent: {e}")
+        logger.error(f"❌ Failed to initialize agent: {e}")
         raise e
 
 @app.on_event("shutdown")
@@ -49,7 +62,10 @@ async def shutdown_event():
 
 async def stream_agent_response(message: str, conversation_history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
     """Stream agent response as Server-Sent Events"""
+    logger.info(f"📨 Received message: {message[:100]}...")
+    
     if not agent:
+        logger.error("❌ Agent not initialized")
         yield f"data: {json.dumps({'type': 'error', 'message': 'Agent not initialized'})}\n\n"
         return
     
@@ -58,6 +74,7 @@ async def stream_agent_response(message: str, conversation_history: List[Dict[st
         from langchain_core.messages import HumanMessage, AIMessage
         history = []
         if conversation_history:
+            logger.info(f"📚 Processing {len(conversation_history)} conversation history items")
             for msg in conversation_history:
                 if msg.get("role") == "user":
                     history.append(HumanMessage(content=msg["content"]))
@@ -65,20 +82,32 @@ async def stream_agent_response(message: str, conversation_history: List[Dict[st
                     history.append(AIMessage(content=msg["content"]))
         
         # Stream the agent response
+        logger.info("🚀 Starting agent streaming...")
         async for update in agent.run_streaming(message, history):
+            logger.debug(f"📤 Streaming update: {update['type']}")
+            
             if update["type"] == "step":
                 yield f"data: {json.dumps({'type': 'step', 'message': update['message'], 'details': update.get('details', '')})}\n\n"
             elif update["type"] == "stream":
                 yield f"data: {json.dumps({'type': 'stream', 'chunk': update['chunk']})}\n\n"
+            elif update["type"] == "tool_result":
+                logger.info(f"🔧 Tool result: {update.get('tool_name', 'Unknown')}")
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': update.get('tool_name', 'Unknown'), 'result': update.get('result', '')})}\n\n"
             elif update["type"] == "response" or update["type"] == "response_complete":
-                yield f"data: {json.dumps({'type': 'response', 'message': update['message'], 'used_tools': update.get('used_tools', False)})}\n\n"
+                logger.info(f"✅ Response complete, used_tools: {update.get('used_tools', False)}")
+                # Don't send the full message again, just the completion signal
+                yield f"data: {json.dumps({'type': 'response_complete', 'used_tools': update.get('used_tools', False)})}\n\n"
             elif update["type"] == "error":
+                logger.error(f"❌ Agent error: {update['message']}")
                 yield f"data: {json.dumps({'type': 'error', 'message': update['message']})}\n\n"
             
             # Small delay to prevent overwhelming the client
             await asyncio.sleep(0.01)
+        
+        logger.info("🏁 Agent streaming completed")
     
     except Exception as e:
+        logger.error(f"❌ Streaming error: {str(e)}")
         yield f"data: {json.dumps({'type': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
 @app.get("/")
@@ -158,10 +187,13 @@ async def chat_simple(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
+    # Configure uvicorn logging
     uvicorn.run(
         "fastapi_app:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="info"
+        log_level="info",
+        access_log=True,
+        use_colors=True
     )

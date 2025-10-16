@@ -21,7 +21,7 @@ class Config:
     MCP_SERVERS = {
         "filesystem": {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/llm_agent"]
         },
         "brave-search": {
             "command": "npx", 

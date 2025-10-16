@@ -42,6 +42,9 @@
         .assistant-message {
             background: #f8f9fa;
             margin-right: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            white-space: pre-wrap;
         }
         .step-message {
             background: #fff3cd;
@@ -52,8 +55,10 @@
         .stream-message {
             background: #d1ecf1;
             border-left: 4px solid #17a2b8;
-            font-family: monospace;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             white-space: pre-wrap;
+            line-height: 1.6;
+            word-wrap: break-word;
         }
         .chat-input {
             display: flex;
@@ -92,6 +97,18 @@
             border-left: 4px solid #28a745;
             font-size: 0.8em;
             margin-top: 5px;
+        }
+        .tool-result {
+            background: #e8f4fd;
+            border-left: 4px solid #007bff;
+            font-size: 0.85em;
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -148,6 +165,14 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
         
+        function addToolResult(toolName, result) {
+            const toolDiv = document.createElement('div');
+            toolDiv.className = 'message tool-result';
+            toolDiv.innerHTML = `<strong>🔧 ${toolName} 결과:</strong>\n${result}`;
+            chatMessages.appendChild(toolDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
         function addStreamMessage(chunk) {
             let streamDiv = document.getElementById('streaming-message');
             if (!streamDiv) {
@@ -165,7 +190,8 @@
             const streamDiv = document.getElementById('streaming-message');
             if (streamDiv) {
                 streamDiv.id = '';
-                streamDiv.className = 'message assistant-message';
+                // Keep the beautiful stream-message styling
+                streamDiv.className = 'message stream-message';
             }
         }
         
@@ -215,6 +241,8 @@
                                 
                                 if (data.type === 'step') {
                                     addStepMessage(data.message, data.details);
+                                } else if (data.type === 'tool_result') {
+                                    addToolResult(data.tool_name, data.result);
                                 } else if (data.type === 'stream') {
                                     addStreamMessage(data.chunk);
                                 } else if (data.type === 'response' || data.type === 'response_complete') {

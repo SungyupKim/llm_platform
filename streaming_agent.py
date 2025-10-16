@@ -1,65 +1,75 @@
-"""
-Streaming LLM Agent with MCP tool support using LangGraph
-"""
-
-import asyncio
-import json
-import logging
-from typing import Dict, Any, List, AsyncGenerator, Literal, Tuple
-from typing_extensions import TypedDict, Annotated
-
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.tools import tool
-from langchain_core.prompts import ChatPromptTemplate
+from typing import Dict, List, Any, TypedDict, Annotated, Literal, AsyncGenerator, Tuple
 from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
-
 from bedrock_client import bedrock_client
 from mcp_client import mcp_client
+from config import Config
+import json
+import asyncio
+import logging
 
 # Configure logger for streaming agent
 logger = logging.getLogger(__name__)
 
 class StreamingAgentState(TypedDict):
     """State for the streaming agent"""
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[List[BaseMessage], "The conversation messages"]
     user_input: str
+    needs_tools: bool
     final_response: str
     error_message: str
+    current_step: str
+    step_details: str
     iteration_count: int
-    needs_tools: bool
+
+# MCP tools will be dynamically loaded from MCP servers
 
 class StreamingAgent:
-    """Streaming LLM Agent with MCP tool support"""
+    """Streaming-enabled agent with real-time progress updates using LangGraph"""
     
     def __init__(self):
         self.llm = bedrock_client.get_llm()
-        self.tools = None
+        
+        # Tools will be loaded dynamically from MCP servers
+        self.tools = []
         self.tool_node = None
         self.llm_with_tools = None
-        self.graph = None
+        
+        # MCP initialization state
         self._mcp_initialized = False
+        
+        # Graph will be built after MCP initialization
+        self.graph = None
     
     async def _ensure_mcp_initialized(self):
-        """Ensure MCP client is initialized and tools are loaded"""
+        """Ensure MCP client is initialized and tools are loaded (only once)"""
+        logger.info("🔧 Checking MCP initialization status...")
         if not self._mcp_initialized:
             logger.info("🚀 Initializing MCP client for the first time...")
             await mcp_client.initialize()
+            logger.info("📦 Loading MCP tools...")
             await self._load_mcp_tools()
             self._mcp_initialized = True
             logger.info("✅ MCP initialization completed")
+        else:
+            logger.info("✅ MCP already initialized, skipping...")
     
     async def _load_mcp_tools(self):
         """Load tools from MCP servers and convert to LangChain tools"""
         try:
+            # Get available tools from MCP servers
             mcp_tools = await mcp_client.get_available_tools()
             logger.info(f"🔍 MCP tools received: {mcp_tools}")
             
+            # Convert MCP tools to LangChain tools
             self.tools = []
             for server_name, server_tools in mcp_tools.items():
                 logger.info(f"🔍 Processing server: {server_name} with {len(server_tools)} tools")
                 for tool_info in server_tools:
+                    logger.debug(f"🔍 Tool info: {tool_info}")
                     langchain_tool = self._create_langchain_tool(tool_info, server_name)
                     if langchain_tool:
                         self.tools.append(langchain_tool)
@@ -73,99 +83,94 @@ class StreamingAgent:
                 self.llm_with_tools = self.llm.bind_tools(self.tools)
                 logger.info(f"✅ Loaded {len(self.tools)} tools from MCP servers")
                 logger.info(f"🔍 Tool names: {[tool.name for tool in self.tools]}")
+                
+                # Build the graph after tools are loaded
                 self._build_graph()
             else:
                 logger.warning("⚠️  No tools loaded from MCP servers")
                 
         except Exception as e:
             logger.error(f"❌ Error loading MCP tools: {e}")
+            import traceback
+            traceback.print_exc()
             self.tools = []
     
     def _create_langchain_tool(self, tool_info: Dict[str, Any], server_name: str):
         """Convert MCP tool info to LangChain tool"""
         try:
-            tool_name = tool_info["name"]
-            tool_description = tool_info["description"]
+            tool_name = tool_info.get("name", "")
+            tool_description = tool_info.get("description", "")
             tool_input_schema = tool_info.get("inputSchema", {})
             
-            # Create dynamic Pydantic model for tool input
-            from pydantic import BaseModel, Field, create_model
-            
-            # Extract properties from input schema
-            properties = tool_input_schema.get("properties", {})
-            required_fields = tool_input_schema.get("required", [])
-            
-            # Create field definitions
-            field_definitions = {}
-            for field_name, field_info in properties.items():
-                field_description = field_info.get("description", "")
-                
-                # Add default values for common tools
-                if tool_name == "list_directory" and field_name == "path":
-                    field_definitions[field_name] = (str, Field(default=".", description=field_description))
-                elif tool_name == "read_file" and field_name == "path":
-                    field_definitions[field_name] = (str, Field(default="README.md", description=field_description))
-                elif tool_name == "query":
-                    # PostgreSQL MCP expects 'sql' parameter
-                    if field_name == "sql":
-                        field_definitions[field_name] = (str, Field(description=field_description))
-                    else:
-                        field_definitions[field_name] = (str, Field(description=field_description))
-                else:
-                    if field_name in required_fields:
-                        field_definitions[field_name] = (str, Field(description=field_description))
-                    else:
-                        field_definitions[field_name] = (str, Field(default="", description=field_description))
-            
-            # Create the Pydantic model
-            ToolInput = create_model(f"{tool_name}Input", **field_definitions)
+            logger.debug(f"🔍 Creating tool: {tool_name} with schema: {tool_input_schema}")
             
             # Create a dynamic tool function
             async def tool_func(**kwargs) -> str:
                 try:
-                    logger.info(f"🔍 tool_func called for {tool_name} with kwargs: {kwargs}")
-                    
-                    # Handle special case for query tool - PostgreSQL MCP expects 'sql' parameter
-                    if tool_name == "query" and "sql" in kwargs:
-                        logger.info(f"🔍 Using sql parameter for query tool: {kwargs}")
-                    elif tool_name == "query" and "query" in kwargs:
-                        # If 'query' parameter is passed, convert to 'sql' for PostgreSQL MCP
-                        new_kwargs = {"sql": kwargs["query"]}
-                        for key, value in kwargs.items():
-                            if key != "query":
-                                new_kwargs[key] = value
-                        kwargs = new_kwargs
-                        logger.info(f"🔍 Converted query to sql parameter: {kwargs}")
-                    
-                    logger.info(f"🔍 Executing tool {tool_name} on server {server_name} with args: {kwargs}")
+                    logger.debug(f"🔍 Executing tool {tool_name} with args: {kwargs}")
                     result = await mcp_client.call_tool(server_name, tool_name, kwargs)
-                    logger.info(f"🔍 Tool result: {result}")
+                    logger.debug(f"🔍 Tool result: {result}")
                     if result["success"]:
                         return json.dumps(result["result"], indent=2)
                     else:
                         return f"Error: {result['error']}"
                 except Exception as e:
-                                logger.error(f"❌ Error executing {tool_name}: {str(e)}")
-                                return f"Error executing {tool_name}: {str(e)}"
+                    logger.error(f"❌ Error executing {tool_name}: {str(e)}")
+                    return f"Error executing {tool_name}: {str(e)}"
             
-            # Create LangChain tool
+            # Create LangChain tool with proper typing
             from langchain_core.tools import tool
+            from pydantic import BaseModel, Field
+            from typing import Optional
             
-            langchain_tool = tool(
-                name=tool_name,
-                description=tool_description,
-                args_schema=ToolInput,
-                func=tool_func
-            )
+            # Create a simple Pydantic model for the tool
+            class ToolInput(BaseModel):
+                pass
             
+            # Add fields based on input schema
+            if tool_input_schema and "properties" in tool_input_schema:
+                for prop_name, prop_info in tool_input_schema["properties"].items():
+                    prop_type = str  # Default to string
+                    if prop_info.get("type") == "string":
+                        prop_type = str
+                    elif prop_info.get("type") == "integer":
+                        prop_type = int
+                    elif prop_info.get("type") == "boolean":
+                        prop_type = bool
+                    
+                    # Add field to the model with default value
+                    default_value = prop_info.get("default")
+                    if default_value is None and prop_name == "path" and tool_name == "list_directory":
+                        default_value = "."  # Default to current directory
+                    
+                    setattr(ToolInput, prop_name, Field(
+                        default=default_value if default_value is not None else ...,
+                        description=prop_info.get("description", "")
+                    ))
+            else:
+                # If no schema provided, add common defaults
+                if tool_name == "list_directory":
+                    setattr(ToolInput, "path", Field(default=".", description="Directory path to list"))
+                elif tool_name == "read_file":
+                    setattr(ToolInput, "path", Field(description="File path to read"))
+            
+            # Set the function name and docstring
+            tool_func.__name__ = tool_name
+            tool_func.__doc__ = tool_description
+            
+            # Create the tool with proper schema
+            langchain_tool = tool(tool_func)
+            logger.debug(f"✅ Created LangChain tool: {langchain_tool.name}")
             return langchain_tool
             
         except Exception as e:
-                logger.error(f"❌ Error creating LangChain tool {tool_info.get('name', 'unknown')}: {e}")
-                return None
-        
+            logger.error(f"❌ Error creating LangChain tool for {tool_info.get('name', 'unknown')}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def _build_graph(self):
-        """Build the LangGraph workflow"""
+        """Build the LangGraph workflow with conditional edges"""
         logger.info("🏗️ Building LangGraph workflow...")
         
         # Create the graph
@@ -200,15 +205,17 @@ class StreamingAgent:
             }
         )
         
+        # Add loop back from execute_tools to llm_with_tools for tool result interpretation
         workflow.add_conditional_edges(
             "execute_tools",
             self._should_continue_after_tools,
             {
-                "continue": "llm_with_tools",
+                "continue": "llm_with_tools",  # Loop back to interpret tool results
                 "final": "final_response"
             }
         )
         
+        # Add edges
         workflow.add_edge("direct_response", END)
         workflow.add_edge("final_response", END)
         
@@ -216,44 +223,52 @@ class StreamingAgent:
         self.graph = workflow.compile()
         logger.info("✅ LangGraph workflow built successfully")
     
-    def _should_use_tools(self, state: StreamingAgentState) -> Literal["direct", "tools"]:
-        """Determine if tools should be used based on analysis"""
-        needs_tools = state.get("needs_tools", False)
-        logger.info(f"🔍 _should_use_tools: needs_tools = {needs_tools}, state keys = {list(state.keys())}")
-        result = "tools" if needs_tools else "direct"
-        logger.info(f"🔍 _should_use_tools: returning {result}")
-        return result
+    def _should_use_tools(self, state: StreamingAgentState) -> str:
+        """Determine if tools should be used based on LLM analysis"""
+        return state.get("needs_tools", False) and "tools" or "direct"
     
-    def _should_execute_tools(self, state: StreamingAgentState) -> Literal["execute", "final"]:
-        """Determine if tools should be executed"""
+    def _should_execute_tools(self, state: StreamingAgentState) -> str:
+        """Determine if tools should be executed based on LLM response"""
         last_message = state["messages"][-1]
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             return "execute"
         else:
-            if last_message.content and not state.get("final_response"):
+            # If no tool calls, set the final response from the LLM's content
+            if hasattr(last_message, 'content') and last_message.content:
                 state["final_response"] = last_message.content
-                logger.info("✅ Final response set from LLM with tools")
             return "final"
     
-    def _should_continue_after_tools(self, state: StreamingAgentState) -> Literal["continue", "final"]:
+    def _should_continue_after_tools(self, state: StreamingAgentState) -> str:
         """Determine if we should continue after tool execution"""
-        iteration_count = state.get("iteration_count", 0)
+        # Prevent infinite loops
         max_iterations = 5
+        current_iterations = state.get("iteration_count", 0)
         
-        if iteration_count >= max_iterations:
-            logger.info(f"🔄 Max iterations reached ({max_iterations}), ending workflow")
+        if current_iterations >= max_iterations:
+            logger.warning(f"⚠️  Maximum iterations ({max_iterations}) reached, stopping")
             return "final"
         
-        last_message = state["messages"][-1]
-        if hasattr(last_message, 'content') and last_message.content:
-            return "final"
+        # Check if we have tool results that need interpretation
+        if len(state["messages"]) >= 2:
+            last_message = state["messages"][-1]
+            # If the last message is a tool result, continue to interpret it
+            if hasattr(last_message, 'content') and last_message.content:
+                return "continue"
         
-        return "continue"
+        # If we're ending, check if we have a final response from the last LLM call
+        if len(state["messages"]) >= 1:
+            last_message = state["messages"][-1]
+            if hasattr(last_message, 'content') and last_message.content and not state.get("final_response"):
+                state["final_response"] = last_message.content
+                logger.info("✅ Final response set from last LLM message")
+        
+        return "final"
     
     async def _analyze_input_node(self, state: StreamingAgentState) -> StreamingAgentState:
         """Analyze input to determine if tools are needed"""
         logger.info("🔍 Analyzing input to determine tool usage...")
         
+        # Use LLM to analyze if tools are needed
         analysis_prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a helpful assistant that analyzes user requests to determine if tools are needed.
 
@@ -262,24 +277,12 @@ Available tools: {tool_names}
 Analyze the user's request and determine if any tools are needed to fulfill it.
 Respond with "YES" if tools are needed, "NO" if a direct response is sufficient.
 
-Focus on the PRIMARY intent of the user's request:
-
-Database-related requests (use query tool):
-- "데이터베이스 목록", "database list", "show databases" -> YES
-- "테이블 목록", "table list", "show tables" -> YES
-- "데이터베이스 정보" -> YES
-
-File system requests (use filesystem tools):
-- "디렉토리 목록", "list directory", "파일 목록" -> YES
-- "파일 읽기", "read file" -> YES
-
-Web search requests (use search tools):
-- "검색", "search", "웹 검색" -> YES
-
-General conversation (no tools needed):
-- "Hello", "안녕", "How are you?" -> NO
-- "What is the weather?" -> NO
-- "Explain something" -> NO
+Examples:
+- "List files in directory" -> YES (needs filesystem tools)
+- "What is the weather?" -> NO (direct response)
+- "Read a file" -> YES (needs filesystem tools)
+- "Hello, how are you?" -> NO (direct response)
+- "Search for information" -> YES (needs search tools)
 """),
             ("human", "User request: {user_input}")
         ])
@@ -294,14 +297,21 @@ General conversation (no tools needed):
             
             needs_tools = "YES" in response.content.upper()
             state["needs_tools"] = needs_tools
+            
             logger.info(f"🔍 LLM analysis: needs_tools = {needs_tools}")
-            logger.info(f"🔍 State after analysis: {dict(state)}")
             
         except Exception as e:
-            logger.error(f"❌ Error analyzing input: {e}")
-            state["needs_tools"] = False
+            logger.error(f"❌ Error in input analysis: {e}")
+            # Fallback to keyword-based detection
+            user_lower = state["user_input"].lower()
+            needs_tools = any(keyword in user_lower for keyword in [
+                "list", "ls", "directory", "files", "read", "write", "create", "search", "find", "query", "database", "sql", 
+                "table", "describe", "structure", "schema", "employee", "select", "show", "display",
+                "디렉토리", "파일", "리스트", "목록", "보여줘", "보여주세요", "읽기", "쓰기", "검색", "찾기", "조회", "데이터베이스"
+            ])
+            state["needs_tools"] = needs_tools
+            logger.info(f"🔍 Fallback analysis: needs_tools = {needs_tools}")
         
-        logger.info(f"🔍 Returning state from _analyze_input_node: needs_tools = {state.get('needs_tools')}")
         return state
     
     async def _direct_response_node(self, state: StreamingAgentState) -> StreamingAgentState:
@@ -316,16 +326,17 @@ General conversation (no tools needed):
                     context_messages.append(("human", msg.content))
                 elif isinstance(msg, AIMessage):
                     context_messages.append(("assistant", msg.content))
-                
+            
             context_messages.append(("human", state["user_input"]))
-                
+            
             prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."),
+                ("system", """You are a helpful AI assistant. Provide clear, accurate, and helpful responses to user questions and requests. 
+                
+Be conversational, friendly, and informative. When users ask for multiple tasks, you can use multiple tools in sequence to complete them all."""),
                 *context_messages
             ])
-                
+            
             response = await self.llm.ainvoke(prompt.format_messages())
-            state["messages"].append(response)
             state["final_response"] = response.content
             
         except Exception as e:
@@ -342,32 +353,17 @@ General conversation (no tools needed):
         state["iteration_count"] = state.get("iteration_count", 0) + 1
         
         try:
-            # Add system message to help with tool usage
-            system_message = SystemMessage(content="""You are a helpful AI assistant with access to various tools. When using tools, be precise and only use the most relevant tool for the user's request:
-
-1. For database-related requests (query tool):
-   - "데이터베이스 목록", "database list", "show databases" → Use query tool with "SELECT datname FROM pg_database;"
-   - "테이블 목록", "table list", "show tables" → Use query tool with "SELECT tablename FROM pg_tables WHERE schemaname = 'public';"
-   - Table structure requests → Use query tool with appropriate SQL
-
-2. For file system requests:
-   - "디렉토리 목록", "list directory", "파일 목록" → Use list_directory tool
-   - "파일 읽기", "read file" → Use read_file tool
-
-3. For web search requests:
-   - "검색", "search", "웹 검색" → Use web search tools
-
-IMPORTANT: Only use ONE tool at a time. Do not use multiple tools unless the user explicitly asks for multiple different types of information. Focus on the primary request.""")
-            
-            # Prepend system message to the conversation
-            messages_with_system = [system_message] + state["messages"]
-            response = await self.llm_with_tools.ainvoke(messages_with_system)
+            response = await self.llm_with_tools.ainvoke(state["messages"])
             state["messages"].append(response)
             
-            # If no tool calls, set final response
-            if not (hasattr(response, 'tool_calls') and response.tool_calls):
-                state["final_response"] = response.content
-                logger.info("✅ Final response set from LLM with tools (no tool calls)")
+            logger.debug(f"🔍 LLM response: {response.content}")
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                logger.info(f"🔍 Tool calls generated: {response.tool_calls}")
+            else:
+                # If no tool calls, this might be the final response
+                if response.content and not state.get("final_response"):
+                    state["final_response"] = response.content
+                    logger.info("✅ Final response set from LLM with tools")
             
         except Exception as e:
             logger.error(f"❌ Error in LLM with tools: {e}")
@@ -380,9 +376,8 @@ IMPORTANT: Only use ONE tool at a time. Do not use multiple tools unless the use
         logger.info("🔧 Executing tools...")
         
         try:
-            # Use ToolNode to execute tools
-            tool_result = await self.tool_node.ainvoke(state)
-            state["messages"].extend(tool_result["messages"])
+            tool_results = await self.tool_node.ainvoke({"messages": [state["messages"][-1]]})
+            state["messages"].extend(tool_results["messages"])
             
         except Exception as e:
             logger.error(f"❌ Error executing tools: {e}")
@@ -391,21 +386,93 @@ IMPORTANT: Only use ONE tool at a time. Do not use multiple tools unless the use
         return state
     
     async def _final_response_node(self, state: StreamingAgentState) -> StreamingAgentState:
-        """Generate final response"""
+        """Generate final response after tool execution"""
         logger.info("📝 Generating final response...")
         
         try:
-            if not state.get("final_response"):
-                # Generate a final response based on the conversation
-                response = await self.llm.ainvoke(state["messages"])
-                state["final_response"] = response.content
-                state["messages"].append(response)
+            # If we already have a final response from the last LLM call, use it
+            if state.get("final_response"):
+                logger.info("✅ Using existing final response")
+                return state
+            
+            # Otherwise, generate a new response
+            response = await self.llm_with_tools.ainvoke(state["messages"])
+            state["final_response"] = response.content
             
         except Exception as e:
             logger.error(f"❌ Error in final response: {e}")
             state["error_message"] = str(e)
+            # Set a fallback response
+            if not state.get("final_response"):
+                state["final_response"] = "죄송합니다. 응답을 생성하는 중 오류가 발생했습니다."
         
         return state
+    
+    async def run_streaming(self, user_input: str, conversation_history: List[BaseMessage] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        """Run the agent with streaming updates using LangGraph"""
+        if conversation_history is None:
+            conversation_history = []
+        
+        # Initialize MCP if not already done
+        await self._ensure_mcp_initialized()
+        
+        # Initialize state
+        state: StreamingAgentState = {
+            "messages": conversation_history + [HumanMessage(content=user_input)],
+            "user_input": user_input,
+            "needs_tools": False,
+            "final_response": "",
+            "error_message": "",
+            "current_step": "",
+            "step_details": "",
+            "iteration_count": 0
+        }
+        
+        try:
+            if not self.graph:
+                yield {"type": "error", "message": "Graph not initialized. No tools available."}
+                return
+            
+            # Run the graph with streaming updates
+            async for update in self._stream_graph_execution(state):
+                yield update
+                
+        except Exception as e:
+            logger.error(f"❌ Error in run_streaming: {e}")
+            yield {"type": "error", "message": f"I apologize, but I encountered an error: {str(e)}"}
+    
+    async def _stream_graph_execution(self, state: StreamingAgentState) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream the execution of the LangGraph with progress updates"""
+        try:
+            # Step 1: Analyze input
+            yield {"type": "step", "message": "🔍 Analyzing your request...", "details": ""}
+            await asyncio.sleep(0.3)
+            
+            # Execute the graph
+            final_state = await self.graph.ainvoke(state)
+            
+            # Extract and stream tool results
+            tool_results = self._extract_tool_results(final_state)
+            for tool_name, tool_result in tool_results:
+                yield {"type": "tool_result", "tool_name": tool_name, "result": tool_result}
+                await asyncio.sleep(0.1)
+            
+            # Stream the final response
+            if final_state.get("final_response"):
+                response = final_state["final_response"]
+                for char in response:
+                    yield {"type": "stream", "chunk": char}
+                    await asyncio.sleep(0.01)
+                
+                # Determine if tools were used
+                used_tools = final_state.get("needs_tools", False)
+                yield {"type": "response_complete", "message": response, "used_tools": used_tools}
+            else:
+                yield {"type": "error", "message": "No response generated"}
+                
+        except Exception as e:
+            logger.error(f"❌ Error in graph execution: {e}")
+            yield {"type": "error", "message": f"Error executing workflow: {str(e)}"}
     
     def _extract_tool_results(self, state: StreamingAgentState) -> List[Tuple[str, str]]:
         """Extract tool results from the conversation state"""
@@ -422,78 +489,34 @@ IMPORTANT: Only use ONE tool at a time. Do not use multiple tools unless the use
         
         return tool_results
     
-    async def _stream_graph_execution(self, initial_state: StreamingAgentState) -> AsyncGenerator[Dict[str, Any], None]:
-        """Stream the graph execution"""
-        try:
-            # Run the graph
-            final_state = await self.graph.ainvoke(initial_state)
-            
-            # Stream tool results if any
-            tool_results = self._extract_tool_results(final_state)
-            for tool_name, result in tool_results:
-                yield {
-                    "type": "tool_result",
-                    "tool_name": tool_name,
-                    "result": result
-                }
-            
-            # Stream the final response
-            final_response = final_state.get("final_response", "")
-            if final_response:
-                # Stream the response character by character
-                for char in final_response:
-                    yield {"type": "stream", "chunk": char}
-                    await asyncio.sleep(0.01)  # Small delay for streaming effect
-                
-                yield {"type": "response_complete", "message": final_response, "used_tools": len(tool_results) > 0}
-            else:
-                yield {"type": "response_complete", "message": "No response generated", "used_tools": False}
-                
-        except Exception as e:
-            logger.error(f"❌ Error in graph execution: {e}")
-            yield {"type": "error", "message": str(e)}
-    
-    async def run_streaming(self, user_input: str, history: List[BaseMessage] = None) -> AsyncGenerator[Dict[str, Any], None]:
-        """Run the streaming agent with the given input"""
-        try:
-            # Ensure MCP is initialized
-            await self._ensure_mcp_initialized()
-            
-            if not self.tools or not self.llm_with_tools:
-                logger.warning("⚠️  No tools available, falling back to direct response")
-                yield {"type": "step", "message": "No tools available, generating direct response..."}
-                
-                # Generate direct response
-                response = await self.llm.ainvoke([HumanMessage(content=user_input)])
-                yield {"type": "stream", "chunk": response.content}
-                yield {"type": "response_complete", "message": response.content, "used_tools": False}
-                return
-            
-            # Initialize state
-            initial_state = StreamingAgentState(
-                messages=history or [HumanMessage(content=user_input)],
-                user_input=user_input,
-                final_response="",
-                error_message="",
-                iteration_count=0,
-                needs_tools=False
-            )
-            
-            # Run the graph
-            yield {"type": "step", "message": "Starting agent workflow..."}
-            
-            async for update in self._stream_graph_execution(initial_state):
-                yield update
-            
-        except Exception as e:
-            logger.error(f"❌ Error in run_streaming: {e}")
-            yield {"type": "error", "message": str(e)}
+    async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """Execute a specific tool"""
+        logger.info(f"Attempting to execute tool: {tool_name} with args: {tool_args}")
+        
+        if not self.tools:
+            logger.error("No tools available. MCP servers may not be initialized.")
+            return "No tools available. MCP servers may not be initialized."
+        
+        for tool in self.tools:
+            if tool.name == tool_name:
+                try:
+                    result = await tool.ainvoke(tool_args)
+                    logger.info(f"Tool {tool_name} executed successfully")
+                    return result
+                except Exception as e:
+                    logger.error(f"Error executing {tool_name}: {str(e)}")
+                    return f"Error executing {tool_name}: {str(e)}"
+        
+        available_tools = [tool.name for tool in self.tools] if self.tools else []
+        logger.warning(f"Tool {tool_name} not found. Available tools: {available_tools}")
+        return f"Tool {tool_name} not found. Available tools: {available_tools}"
     
     async def close(self):
         """Close the agent and clean up resources"""
-        try:
-            if self._mcp_initialized:
+        if self._mcp_initialized:
+            try:
                 await mcp_client.close()
+                self._mcp_initialized = False
                 logger.info("✅ MCP client closed successfully")
-        except Exception as e:
-            logger.error(f"❌ Error closing MCP client: {e}")
+            except Exception as e:
+                logger.error(f"Error closing MCP client: {e}")

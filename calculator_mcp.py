@@ -109,11 +109,11 @@ async def handle_request(request: dict) -> dict:
             logger.info(f"🔍 tools/call received: tool_name={tool_name}, arguments={arguments}")
             
             if tool_name == "add":
-                result = await add_numbers(arguments.get("a", 0), arguments.get("b", 0))
+                result = await add(arguments.get("a", 0), arguments.get("b", 0))
             elif tool_name == "multiply":
-                result = await multiply_numbers(arguments.get("a", 0), arguments.get("b", 0))
+                result = await multiply(arguments.get("a", 0), arguments.get("b", 0))
             elif tool_name == "divide":
-                result = await divide_numbers(arguments.get("a", 0), arguments.get("b", 0))
+                result = await divide(arguments.get("a", 0), arguments.get("b", 0))
             else:
                 result = f"Unknown tool: {tool_name}"
             
@@ -154,7 +154,7 @@ async def handle_request(request: dict) -> dict:
             }
         }
 
-async def add_numbers(a: float, b: float) -> str:
+async def add(a: float, b: float) -> str:
     """Add two numbers"""
     try:
         result = a + b
@@ -162,7 +162,7 @@ async def add_numbers(a: float, b: float) -> str:
     except Exception as e:
         return f"Error adding {a} and {b}: {str(e)}"
 
-async def multiply_numbers(a: float, b: float) -> str:
+async def multiply(a: float, b: float) -> str:
     """Multiply two numbers"""
     try:
         result = a * b
@@ -170,7 +170,7 @@ async def multiply_numbers(a: float, b: float) -> str:
     except Exception as e:
         return f"Error multiplying {a} and {b}: {str(e)}"
 
-async def divide_numbers(a: float, b: float) -> str:
+async def divide(a: float, b: float) -> str:
     """Divide first number by second number"""
     try:
         if b == 0:

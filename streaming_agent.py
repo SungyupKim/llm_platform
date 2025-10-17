@@ -113,8 +113,16 @@ class StreamingAgent:
                     print(f"🔍 tool_func called with kwargs: {kwargs}")
                     logger.debug(f"🔍 Executing tool {tool_name} with args: {kwargs}")
                     
+                    # Handle kwargs wrapper - if there's a 'kwargs' key, use its value
+                    if 'kwargs' in kwargs and len(kwargs) == 1:
+                        actual_args = kwargs['kwargs']
+                    else:
+                        actual_args = kwargs
+                    
+                    print(f"🔍 Actual args after unwrapping: {actual_args}")
+                    
                     # Use the synchronous version of call_tool
-                    result = mcp_client.call_tool_sync(server_name, tool_name, kwargs)
+                    result = mcp_client.call_tool_sync(server_name, tool_name, actual_args)
                     
                     logger.debug(f"🔍 Tool result: {result}")
                     if result["success"]:

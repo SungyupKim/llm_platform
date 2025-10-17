@@ -21,24 +21,20 @@ class Config:
     MCP_SERVERS = {
         "filesystem": {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/workspace/private/llm_agent"],
-            "env": {
-                "PATH": "/home/ubuntu/workspace/merge/genai360-app/.gradle/nodejs/node-v16.13.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            }
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/llm_agent"]
         },
         "brave-search": {
             "command": "npx", 
             "args": ["-y", "@modelcontextprotocol/server-brave-search"],
             "env": {
-                "PATH": "/home/ubuntu/workspace/merge/genai360-app/.gradle/nodejs/node-v16.13.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                 "BRAVE_API_KEY": "your_brave_api_key_here"
             }
         },
         "postgres": {
             "command": "python",
-            "args": ["/home/ubuntu/workspace/private/llm_agent/multi_db_postgres_mcp.py"],
+            "args": ["/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"],
             "env": {
-                "POSTGRES_CONNECTION_STRING": os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://user:password@localhost:5432/dbname")
+                "POSTGRES_CONNECTION_STRING": os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://test:test@localhost:5432/test")
             }
         }
     }

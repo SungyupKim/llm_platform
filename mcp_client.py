@@ -19,7 +19,7 @@ class McpClientManager:
         """Initialize all MCP servers"""
         if self.initialized:
             return
-        
+            
         print(f"🚀 Initializing MCP servers...")
         
         # Connect to servers in parallel for faster initialization
@@ -159,26 +159,42 @@ class McpClientManager:
                             
                             print(f"🔍 Final arguments: {arguments}")
                             
+                            # Generate unique request ID
+                            import time
+                            request_id = int(time.time() * 1000) % 100000
+                            
                             # Send tool call message
-                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
+                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": {request_id}, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
                             print(f"🔍 Tool call message: {tool_call_msg.strip()}")
                             
                             self.process.stdin.write(tool_call_msg.encode())
                             await self.process.stdin.drain()
                             
-                            # Read response
-                            response = await self.process.stdout.readline()
-                            print(f"🔍 MCP server {server_name} tool call response: {response.decode().strip()}")
-                            
-                            # Parse response
-                            try:
-                                data = json.loads(response.decode())
-                                if "result" in data and "content" in data["result"]:
-                                    return data["result"]["content"][0]["text"] if data["result"]["content"] else ""
-                                elif "error" in data:
-                                    return f"Error: {data['error'].get('message', 'Unknown error')}"
-                            except Exception as e:
-                                print(f"❌ Error parsing tool response: {e}")
+                            # Read responses until we get the one with matching ID
+                            max_attempts = 10
+                            for attempt in range(max_attempts):
+                                response = await self.process.stdout.readline()
+                                response_text = response.decode().strip()
+                                print(f"🔍 MCP server {server_name} tool call response (attempt {attempt+1}): {response_text}")
+                                
+                                try:
+                                    data = json.loads(response_text)
+                                    response_id = data.get("id")
+                                    
+                                    # Check if this is the response we're waiting for
+                                    if response_id == request_id:
+                                        if "result" in data and "content" in data["result"]:
+                                            return data["result"]["content"][0]["text"] if data["result"]["content"] else ""
+                                        elif "error" in data:
+                                            return f"Error: {data['error'].get('message', 'Unknown error')}"
+                                        else:
+                                            return str(data.get("result", ""))
+                                    else:
+                                        print(f"⚠️ Skipping response with mismatched ID: expected {request_id}, got {response_id}")
+                                        continue
+                                except Exception as e:
+                                    print(f"❌ Error parsing tool response: {e}")
+                                    continue
                             
                             return f"Tool {tool_name} executed with arguments {arguments}"
                         
@@ -193,8 +209,12 @@ class McpClientManager:
                             
                             print(f"🔍 Final arguments: {arguments}")
                             
+                            # Generate unique request ID
+                            import time
+                            request_id = int(time.time() * 1000) % 100000
+                            
                             # Send tool call message
-                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
+                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": {request_id}, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
                             print(f"🔍 Tool call message: {tool_call_msg.strip()}")
                             
                             # Use subprocess to avoid asyncio conflicts
@@ -207,79 +227,64 @@ class McpClientManager:
                                 # Check if we have a persistent MCP server process
                                 if not hasattr(self, '_mcp_process') or self._mcp_process.poll() is not None:
                                     # Start a new persistent MCP server process
+                                    env = os.environ.copy()
+                                    env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
+                                    
                                     self._mcp_process = subprocess.Popen(
-                                        [sys.executable, "/home/ubuntu/workspace/private/llm_agent/multi_db_postgres_mcp.py"],
+                                        [sys.executable, "/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"],
                                         stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
                                         text=True,
-                                        env=os.environ.copy()
+                                        env=env
                                     )
                                 
                                 # Send the request to the persistent process
                                 self._mcp_process.stdin.write(tool_call_msg.strip() + '\n')
                                 self._mcp_process.stdin.flush()
                                 
-                                # Read response - read all available output
-                                stdout_lines = []
-                                while True:
+                                # Read responses until we get the one with matching ID
+                                max_attempts = 10
+                                for attempt in range(max_attempts):
                                     try:
                                         line = self._mcp_process.stdout.readline()
                                         if not line:
                                             break
-                                        stdout_lines.append(line.strip())
-                                        # Stop reading if we find a complete JSON response
-                                        if line.strip().startswith('{') and line.strip().endswith('}'):
-                                            break
-                                    except:
+                                        
+                                        line = line.strip()
+                                        print(f"🔍 MCP server {server_name} tool call response (attempt {attempt+1}): {line}")
+                                        
+                                        # Parse response
+                                        try:
+                                            data = json.loads(line)
+                                            response_id = data.get("id")
+                                            
+                                            # Check if this is the response we're waiting for
+                                            if response_id == request_id:
+                                                if "result" in data and "content" in data["result"]:
+                                                    return data["result"]["content"][0]["text"] if data["result"]["content"] else ""
+                                                elif "error" in data:
+                                                    return f"Error: {data['error'].get('message', 'Unknown error')}"
+                                                else:
+                                                    return str(data.get("result", ""))
+                                            else:
+                                                print(f"⚠️ Skipping response with mismatched ID: expected {request_id}, got {response_id}")
+                                                continue
+                                        except json.JSONDecodeError:
+                                            # Skip non-JSON lines (debug logs)
+                                            continue
+                                    except Exception as e:
+                                        print(f"❌ Error reading response: {e}")
                                         break
-                                
-                                stdout = '\n'.join(stdout_lines)
-                                stderr = ""
                                 
                                 if self._mcp_process.poll() is not None:
                                     return f"Error: MCP server process terminated"
                                 
-                                # Parse the response
-                                try:
-                                    # Find the JSON response in the output (skip debug logs)
-                                    lines = stdout.strip().split('\n')
-                                    json_line = None
-                                    
-                                    # Look for the last complete JSON line
-                                    for line in reversed(lines):
-                                        line = line.strip()
-                                        if line.startswith('{') and line.endswith('}'):
-                                            json_line = line
-                                            break
-                                    
-                                    if json_line:
-                                        data = json.loads(json_line)
-                                        if "result" in data:
-                                            if "content" in data["result"]:
-                                                # Handle multi_db_postgres_mcp.py response format
-                                                content = data["result"]["content"]
-                                                if isinstance(content, list) and len(content) > 0:
-                                                    if "text" in content[0]:
-                                                        return content[0]["text"]
-                                                return str(content)
-                                            else:
-                                                # Handle simple response format
-                                                return str(data["result"])
-                                        elif "error" in data:
-                                            return f"Error: {data['error'].get('message', 'Unknown error')}"
-                                    else:
-                                        print(f"🔍 No JSON found in output: {stdout}")
-                                        return f"Error: No valid JSON response found in output"
-                                except Exception as e:
-                                    print(f"❌ Error parsing tool response: {e}")
-                                    print(f"🔍 Raw response: {stdout}")
-                                    return f"Error parsing response: {str(e)}"
-                                
                                 return f"Tool {tool_name} executed with arguments {arguments}"
                                 
                             except subprocess.TimeoutExpired:
-                                process.kill()
+                                if hasattr(self, '_mcp_process'):
+                                    self._mcp_process.kill()
                                 return f"Error: MCP server timeout"
                             except Exception as e:
                                 print(f"❌ Error in call_tool_sync: {e}")
@@ -353,12 +358,12 @@ class McpClientManager:
         
         # Session must exist for real MCP server
         if session is None:
-            return {
-                "success": False,
+                return {
+                    "success": False,
                 "error": f"Server {server_name} session is None",
-                "server": server_name,
+                    "server": server_name,
                 "tool": tool_name
-            }
+                }
         
         # Use real MCP server
         try:
@@ -413,7 +418,7 @@ class McpClientManager:
                 "result": result,
                 "server": server_name,
                 "tool": tool_name,
-                "mode": "real"
+            "mode": "real"
             }
         except Exception as e:
             print(f"❌ Real MCP tool call failed for {server_name}.{tool_name}: {e}")
@@ -423,7 +428,7 @@ class McpClientManager:
                 "server": server_name,
                 "tool": tool_name
             }
-    
+
     
     async def _real_postgres_query(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute real PostgreSQL queries"""

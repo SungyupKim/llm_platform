@@ -21,20 +21,24 @@ class Config:
     MCP_SERVERS = {
         "filesystem": {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/llm_agent"]
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/workspace/private/llm_agent"],
+            "env": {
+                "PATH": "/home/ubuntu/workspace/merge/genai360-app/.gradle/nodejs/node-v16.13.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            }
         },
         "brave-search": {
             "command": "npx", 
             "args": ["-y", "@modelcontextprotocol/server-brave-search"],
             "env": {
+                "PATH": "/home/ubuntu/workspace/merge/genai360-app/.gradle/nodejs/node-v16.13.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                 "BRAVE_API_KEY": "your_brave_api_key_here"
             }
         },
         "postgres": {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-postgres"],
+            "args": ["-y", "@modelcontextprotocol/server-postgres", os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://user:password@localhost:5432/dbname")],
             "env": {
-                "POSTGRES_CONNECTION_STRING": "postgresql://user:password@localhost:5432/dbname"
+                "PATH": "/home/ubuntu/workspace/merge/genai360-app/.gradle/nodejs/node-v16.13.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             }
         }
     }

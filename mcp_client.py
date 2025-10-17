@@ -198,110 +198,6 @@ class McpClientManager:
                             
                             return f"Tool {tool_name} executed with arguments {arguments}"
                         
-                        def call_tool_sync(self, tool_name, arguments):
-                            print(f"🔍 call_tool_sync called with tool_name: {tool_name}, arguments: {arguments}")
-                            
-                            # Add default arguments for common tools
-                            if tool_name == "list_directory" and "path" not in arguments:
-                                arguments["path"] = "."
-                            elif tool_name == "read_file" and "path" not in arguments:
-                                arguments["path"] = "README.md"  # Default file
-                            
-                            print(f"🔍 Final arguments: {arguments}")
-                            
-                            # Generate unique request ID
-                            import time
-                            request_id = int(time.time() * 1000) % 100000
-                            
-                            # Send tool call message
-                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": {request_id}, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
-                            print(f"🔍 Tool call message: {tool_call_msg.strip()}")
-                            
-                            # Use subprocess to avoid asyncio conflicts
-                            import subprocess
-                            import tempfile
-                            import os
-                            import sys
-                            
-                            try:
-                                # Check if we have a persistent MCP server process for this server
-                                process_key = f'_mcp_process_{server_name}'
-                                if not hasattr(self, process_key) or getattr(self, process_key).poll() is not None:
-                                    # Start a new persistent MCP server process for the specific server
-                                    env = os.environ.copy()
-                                    
-                                    # Determine the correct MCP server script based on server_name
-                                    if server_name == "calculator":
-                                        server_script = "/home/ubuntu/llm_agent/calculator_mcp.py"
-                                    elif server_name == "postgres":
-                                        server_script = "/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"
-                                        env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
-                                    else:
-                                        # For other servers, we need to handle them differently
-                                        return f"Error: Unsupported server for sync call: {server_name}"
-                                    
-                                    mcp_process = subprocess.Popen(
-                                        [sys.executable, server_script],
-                                        stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True,
-                                        env=env
-                                    )
-                                    setattr(self, process_key, mcp_process)
-                                
-                                mcp_process = getattr(self, process_key)
-                                
-                                # Send the request to the persistent process
-                                mcp_process.stdin.write(tool_call_msg.strip() + '\n')
-                                mcp_process.stdin.flush()
-                                
-                                # Read responses until we get the one with matching ID
-                                max_attempts = 10
-                                for attempt in range(max_attempts):
-                                    try:
-                                        line = mcp_process.stdout.readline()
-                                        if not line:
-                                            break
-                                        
-                                        line = line.strip()
-                                        print(f"🔍 MCP server {server_name} tool call response (attempt {attempt+1}): {line}")
-                                        
-                                        # Parse response
-                                        try:
-                                            data = json.loads(line)
-                                            response_id = data.get("id")
-                                            
-                                            # Check if this is the response we're waiting for
-                                            if response_id == request_id:
-                                                if "result" in data and "content" in data["result"]:
-                                                    return data["result"]["content"][0]["text"] if data["result"]["content"] else ""
-                                                elif "error" in data:
-                                                    return f"Error: {data['error'].get('message', 'Unknown error')}"
-                                                else:
-                                                    return str(data.get("result", ""))
-                                            else:
-                                                print(f"⚠️ Skipping response with mismatched ID: expected {request_id}, got {response_id}")
-                                                continue
-                                        except json.JSONDecodeError:
-                                            # Skip non-JSON lines (debug logs)
-                                            continue
-                                    except Exception as e:
-                                        print(f"❌ Error reading response: {e}")
-                                        break
-                                
-                                if mcp_process.poll() is not None:
-                                    return f"Error: MCP server process terminated"
-                                
-                                return f"Tool {tool_name} executed with arguments {arguments}"
-                                
-                            except subprocess.TimeoutExpired:
-                                if hasattr(self, process_key):
-                                    getattr(self, process_key).kill()
-                                return f"Error: MCP server timeout"
-                            except Exception as e:
-                                print(f"❌ Error in call_tool_sync: {e}")
-                                return f"Error: {str(e)}"
                     
                     session = SimpleSession(process)
                     await session.initialize()
@@ -398,6 +294,29 @@ class McpClientManager:
                 "tool": tool_name
             }
     
+    def _get_server_script_path(self, server_name: str) -> str:
+        """Get the script path for a given server name"""
+        import os
+        
+        # Base directory for MCP servers
+        base_dir = "/home/ubuntu/llm_agent"
+        
+        # Server name to script mapping
+        server_scripts = {
+            "calculator": f"{base_dir}/calculator_mcp.py",
+            "postgres": f"{base_dir}/multi_db_postgres_mcp.py",
+            "filesystem": None,  # External npm package
+            "brave-search": None,  # External npm package
+        }
+        
+        script_path = server_scripts.get(server_name)
+        
+        # Check if the script exists
+        if script_path and os.path.exists(script_path):
+            return script_path
+        
+        return None
+    
     def call_tool_sync(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Synchronous version of call_tool for use in sync contexts"""
         if not self.initialized:
@@ -424,14 +343,131 @@ class McpClientManager:
         
         # Use real MCP server with synchronous call
         try:
-            # Call the actual tool on the MCP server synchronously
-            result = session.call_tool_sync(tool_name, arguments)
-            return {
+            print(f"🔍 call_tool_sync called with tool_name: {tool_name}, arguments: {arguments}")
+            
+            # Add default arguments for common tools
+            if tool_name == "list_directory" and "path" not in arguments:
+                arguments["path"] = "."
+            elif tool_name == "read_file" and "path" not in arguments:
+                arguments["path"] = "README.md"  # Default file
+            
+            print(f"🔍 Final arguments: {arguments}")
+            
+            # Generate unique request ID
+            import time
+            request_id = int(time.time() * 1000) % 100000
+            
+            # Send tool call message
+            tool_call_msg = f'{{"jsonrpc": "2.0", "id": {request_id}, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
+            print(f"🔍 Tool call message: {tool_call_msg.strip()}")
+            
+            # Use subprocess to avoid asyncio conflicts
+            import subprocess
+            import os
+            import sys
+            
+            # Check if we have a persistent MCP server process for this server
+            process_key = f'_mcp_process_{server_name}'
+            if not hasattr(self, process_key) or getattr(self, process_key).poll() is not None:
+                # Start a new persistent MCP server process for the specific server
+                env = os.environ.copy()
+                
+                # Determine the correct MCP server script based on server_name
+                server_script = self._get_server_script_path(server_name)
+                if not server_script:
+                    return {
+                        "success": False,
+                        "error": f"Unsupported server for sync call: {server_name}",
+                        "server": server_name,
+                        "tool": tool_name
+                    }
+                
+                # Set server-specific environment variables
+                if server_name == "postgres":
+                    env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
+                
+                mcp_process = subprocess.Popen(
+                    [sys.executable, server_script],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=env
+                )
+                setattr(self, process_key, mcp_process)
+            
+            mcp_process = getattr(self, process_key)
+            
+            # Send the request to the persistent process
+            mcp_process.stdin.write(tool_call_msg.strip() + '\n')
+            mcp_process.stdin.flush()
+            
+            # Read responses until we get the one with matching ID
+            max_attempts = 10
+            for attempt in range(max_attempts):
+                try:
+                    line = mcp_process.stdout.readline()
+                    if not line:
+                        break
+                    
+                    line = line.strip()
+                    print(f"🔍 MCP server {server_name} tool call response (attempt {attempt+1}): {line}")
+                    
+                    # Parse response
+                    try:
+                        data = json.loads(line)
+                        response_id = data.get("id")
+                        
+                        # Check if this is the response we're waiting for
+                        if response_id == request_id:
+                            if "result" in data and "content" in data["result"]:
+                                result = data["result"]["content"][0]["text"] if data["result"]["content"] else ""
+                            elif "error" in data:
+                                result = f"Error: {data['error'].get('message', 'Unknown error')}"
+                            else:
+                                result = str(data.get("result", ""))
+                            
+                            return {
+                                "success": True,
+                                "result": result,
+                                "server": server_name,
+                                "tool": tool_name,
+                                "mode": "real"
+                            }
+                        else:
+                            print(f"⚠️ Skipping response with mismatched ID: expected {request_id}, got {response_id}")
+                            continue
+                    except json.JSONDecodeError:
+                        # Skip non-JSON lines (debug logs)
+                        continue
+                except Exception as e:
+                    print(f"❌ Error reading response: {e}")
+                    break
+            
+            if mcp_process.poll() is not None:
+                return {
+                    "success": False,
+                    "error": "MCP server process terminated",
+                    "server": server_name,
+                    "tool": tool_name
+                }
+            
+                return {
                 "success": True,
-                "result": result,
+                "result": f"Tool {tool_name} executed with arguments {arguments}",
                 "server": server_name,
                 "tool": tool_name,
                 "mode": "real"
+            }
+            
+        except subprocess.TimeoutExpired:
+            if hasattr(self, process_key):
+                getattr(self, process_key).kill()
+            return {
+                "success": False,
+                "error": "MCP server timeout",
+                "server": server_name,
+                "tool": tool_name
             }
         except Exception as e:
             print(f"❌ Real MCP tool call failed for {server_name}.{tool_name}: {e}")

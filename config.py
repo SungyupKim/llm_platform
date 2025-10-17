@@ -36,6 +36,10 @@ class Config:
             "env": {
                 "POSTGRES_CONNECTION_STRING": os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://test:test@localhost:5432/test")
             }
+        },
+        "calculator": {
+            "command": "python",
+            "args": ["/home/ubuntu/llm_agent/calculator_mcp.py"]
         }
     }
     

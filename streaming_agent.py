@@ -104,11 +104,15 @@ class StreamingAgent:
             
             logger.debug(f"🔍 Creating tool: {tool_name} with schema: {tool_input_schema}")
             
-            # Create a dynamic tool function
-            async def tool_func(**kwargs) -> str:
+            # Create a dynamic tool function (synchronous)
+            def tool_func(**kwargs) -> str:
                 try:
+                    print(f"🔍 tool_func called with kwargs: {kwargs}")
                     logger.debug(f"🔍 Executing tool {tool_name} with args: {kwargs}")
-                    result = await mcp_client.call_tool(server_name, tool_name, kwargs)
+                    
+                    # Use the synchronous version of call_tool
+                    result = mcp_client.call_tool_sync(server_name, tool_name, kwargs)
+                    
                     logger.debug(f"🔍 Tool result: {result}")
                     if result["success"]:
                         return json.dumps(result["result"], indent=2)
@@ -129,6 +133,8 @@ class StreamingAgent:
             
             # Add fields based on input schema
             if tool_input_schema and "properties" in tool_input_schema:
+                required_fields = tool_input_schema.get("required", [])
+                
                 for prop_name, prop_info in tool_input_schema["properties"].items():
                     prop_type = str  # Default to string
                     if prop_info.get("type") == "string":
@@ -137,14 +143,27 @@ class StreamingAgent:
                         prop_type = int
                     elif prop_info.get("type") == "boolean":
                         prop_type = bool
+                    elif prop_info.get("type") == "array":
+                        prop_type = list
                     
                     # Add field to the model with default value
                     default_value = prop_info.get("default")
+                    is_required = prop_name in required_fields
+                    
+                    # Set default values for common tools
                     if default_value is None and prop_name == "path" and tool_name == "list_directory":
                         default_value = "."  # Default to current directory
+                    elif default_value is None and prop_name == "sql" and tool_name == "query":
+                        default_value = "SELECT 1;"  # Default SQL query
+                    
+                    # Use ... for required fields, default_value for optional fields
+                    if is_required and default_value is None:
+                        field_default = ...
+                    else:
+                        field_default = default_value
                     
                     setattr(ToolInput, prop_name, Field(
-                        default=default_value if default_value is not None else ...,
+                        default=field_default,
                         description=prop_info.get("description", "")
                     ))
             else:
@@ -158,8 +177,27 @@ class StreamingAgent:
             tool_func.__name__ = tool_name
             tool_func.__doc__ = tool_description
             
-            # Create the tool with proper schema
-            langchain_tool = tool(tool_func)
+            # Create the tool with explicit function signatures for specific tools
+            if tool_name == "query":
+                # Create query tool with explicit sql parameter
+                def query_tool(sql: str) -> str:
+                    return tool_func(sql=sql)
+                
+                query_tool.__name__ = tool_name
+                query_tool.__doc__ = tool_description
+                langchain_tool = tool(query_tool)
+            elif tool_name == "list_directory":
+                # Create list_directory tool with explicit path parameter
+                def list_dir_tool(path: str = ".") -> str:
+                    return tool_func(path=path)
+                
+                list_dir_tool.__name__ = tool_name
+                list_dir_tool.__doc__ = tool_description
+                langchain_tool = tool(list_dir_tool)
+            else:
+                # Create the tool with proper schema for other tools
+                langchain_tool = tool(tool_func)
+            
             logger.debug(f"✅ Created LangChain tool: {langchain_tool.name}")
             return langchain_tool
             
@@ -278,11 +316,14 @@ Analyze the user's request and determine if any tools are needed to fulfill it.
 Respond with "YES" if tools are needed, "NO" if a direct response is sufficient.
 
 Examples:
-- "List files in directory" -> YES (needs filesystem tools)
+- "List files in directory" -> YES (needs list_directory tool)
+- "Show database tables" -> YES (needs query tool with SQL)
+- "Read a file" -> YES (needs read_text_file tool)
+- "Search for information" -> YES (needs brave_web_search tool)
 - "What is the weather?" -> NO (direct response)
-- "Read a file" -> YES (needs filesystem tools)
 - "Hello, how are you?" -> NO (direct response)
-- "Search for information" -> YES (needs search tools)
+- "Database table list" -> YES (needs query tool with SQL)
+- "데이터베이스 테이블 목록" -> YES (needs query tool with SQL)
 """),
             ("human", "User request: {user_input}")
         ])
@@ -353,7 +394,25 @@ Be conversational, friendly, and informative. When users ask for multiple tasks,
         state["iteration_count"] = state.get("iteration_count", 0) + 1
         
         try:
-            response = await self.llm_with_tools.ainvoke(state["messages"])
+            # Add system message with tool guidance
+            system_message = """You are a helpful AI assistant with access to various tools. When users ask for specific information that requires tools, use them appropriately.
+
+Available tools:
+- query: Execute SQL queries on PostgreSQL database (use for database operations)
+- list_directory: List files and directories (use for file system exploration)
+- read_text_file: Read file contents (use for reading files)
+- brave_web_search: Search the web (use for current information)
+
+For database queries, use the query tool with proper SQL. For example:
+- To list tables: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
+- To get database version: "SELECT version();"
+
+Always provide the exact SQL query needed for the user's request."""
+
+            # Create messages with system guidance
+            messages_with_system = [{"role": "system", "content": system_message}] + state["messages"]
+            
+            response = await self.llm_with_tools.ainvoke(messages_with_system)
             state["messages"].append(response)
             
             logger.debug(f"🔍 LLM response: {response.content}")

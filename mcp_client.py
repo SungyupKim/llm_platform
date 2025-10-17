@@ -149,14 +149,20 @@ class McpClientManager:
                             return type('obj', (object,), {'tools': self.tools})()
                         
                         async def call_tool(self, tool_name, arguments):
+                            print(f"🔍 call_tool called with tool_name: {tool_name}, arguments: {arguments}")
+                            
                             # Add default arguments for common tools
                             if tool_name == "list_directory" and "path" not in arguments:
                                 arguments["path"] = "."
                             elif tool_name == "read_file" and "path" not in arguments:
                                 arguments["path"] = "README.md"  # Default file
                             
+                            print(f"🔍 Final arguments: {arguments}")
+                            
                             # Send tool call message
                             tool_call_msg = f'{{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
+                            print(f"🔍 Tool call message: {tool_call_msg.strip()}")
+                            
                             self.process.stdin.write(tool_call_msg.encode())
                             await self.process.stdin.drain()
                             
@@ -175,6 +181,57 @@ class McpClientManager:
                                 print(f"❌ Error parsing tool response: {e}")
                             
                             return f"Tool {tool_name} executed with arguments {arguments}"
+                        
+                        def call_tool_sync(self, tool_name, arguments):
+                            print(f"🔍 call_tool_sync called with tool_name: {tool_name}, arguments: {arguments}")
+                            
+                            # Add default arguments for common tools
+                            if tool_name == "list_directory" and "path" not in arguments:
+                                arguments["path"] = "."
+                            elif tool_name == "read_file" and "path" not in arguments:
+                                arguments["path"] = "README.md"  # Default file
+                            
+                            print(f"🔍 Final arguments: {arguments}")
+                            
+                            # Send tool call message
+                            tool_call_msg = f'{{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {{"name": "{tool_name}", "arguments": {json.dumps(arguments)}}}}}\n'
+                            print(f"🔍 Tool call message: {tool_call_msg.strip()}")
+                            
+                            # Use ThreadPoolExecutor to run async operations in a separate thread
+                            import asyncio
+                            import concurrent.futures
+                            
+                            async def async_call():
+                                self.process.stdin.write(tool_call_msg.encode())
+                                await self.process.stdin.drain()
+                                
+                                # Read response
+                                response = await self.process.stdout.readline()
+                                print(f"🔍 MCP server {server_name} tool call response: {response.decode().strip()}")
+                                
+                                # Parse response
+                                try:
+                                    data = json.loads(response.decode())
+                                    if "result" in data and "content" in data["result"]:
+                                        return data["result"]["content"][0]["text"] if data["result"]["content"] else ""
+                                    elif "error" in data:
+                                        return f"Error: {data['error'].get('message', 'Unknown error')}"
+                                except Exception as e:
+                                    print(f"❌ Error parsing tool response: {e}")
+                                
+                                return f"Tool {tool_name} executed with arguments {arguments}"
+                            
+                            def run_in_thread():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    return loop.run_until_complete(async_call())
+                                finally:
+                                    loop.close()
+                            
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(run_in_thread)
+                                return future.result()
                     
                     session = SimpleSession(process)
                     await session.initialize()
@@ -258,6 +315,50 @@ class McpClientManager:
             return {
                 "success": True,
                 "result": result.content if hasattr(result, 'content') else result,
+                "server": server_name,
+                "tool": tool_name,
+                "mode": "real"
+            }
+        except Exception as e:
+            print(f"❌ Real MCP tool call failed for {server_name}.{tool_name}: {e}")
+            return {
+                "success": False,
+                "error": f"Tool call failed: {str(e)}",
+                "server": server_name,
+                "tool": tool_name
+            }
+    
+    def call_tool_sync(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Synchronous version of call_tool for use in sync contexts"""
+        if not self.initialized:
+            raise RuntimeError("McpClientManager not initialized")
+        
+        if server_name not in self.sessions:
+            return {
+                "success": False,
+                "error": f"Server {server_name} not connected",
+                "server": server_name,
+                "tool": tool_name
+            }
+        
+        session = self.sessions[server_name]
+        
+        # Session must exist for real MCP server
+        if session is None:
+            return {
+                "success": False,
+                "error": f"Server {server_name} session is None",
+                "server": server_name,
+                "tool": tool_name
+            }
+        
+        # Use real MCP server with synchronous call
+        try:
+            # Call the actual tool on the MCP server synchronously
+            result = session.call_tool_sync(tool_name, arguments)
+            return {
+                "success": True,
+                "result": result,
                 "server": server_name,
                 "tool": tool_name,
                 "mode": "real"

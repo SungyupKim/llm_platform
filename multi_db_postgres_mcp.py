@@ -68,6 +68,8 @@ async def handle_request(request: dict) -> dict:
         params = request.get("params", {})
         request_id = request.get("id")
         
+        print(f"🔍 handle_request received: method={method}, params={params}, id={request_id}", file=sys.stderr)
+        
         if method == "initialize":
             return {
                 "jsonrpc": "2.0",
@@ -180,6 +182,8 @@ async def handle_request(request: dict) -> dict:
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
             
+            print(f"🔍 tools/call received: tool_name={tool_name}, arguments={arguments}", file=sys.stderr)
+            
             if tool_name == "list_databases":
                 result = await list_databases()
             elif tool_name == "use_database":
@@ -196,6 +200,8 @@ async def handle_request(request: dict) -> dict:
                 result = get_current_database()
             else:
                 result = f"Unknown tool: {tool_name}"
+            
+            print(f"🔍 tools/call result: {result}", file=sys.stderr)
             
             # Check if result is already in the correct format
             if isinstance(result, dict) and "content" in result:
@@ -417,6 +423,8 @@ async def describe_table(table_name: str, database: str = None) -> str:
 
 async def main():
     """Main function to run the MCP server"""
+    print("🚀 Starting Multi-DB PostgreSQL MCP Server", file=sys.stderr)
+    
     # Test database connection
     try:
         get_db_connection()
@@ -452,4 +460,5 @@ async def main():
             sys.stdout.flush()
 
 if __name__ == "__main__":
+    print("🚀 Multi-DB PostgreSQL MCP Server starting...", file=sys.stderr)
     asyncio.run(main())

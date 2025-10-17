@@ -435,14 +435,19 @@ Available tools:
 {tools_text}
 
 For database operations, use the appropriate tools:
-- query: Execute SQL queries (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, etc.) - ALWAYS pass database parameter: query(sql="SELECT * FROM table", database="database_name")
-- list_tables: List tables in the current or specified database (ALWAYS pass database parameter: list_tables(database="database_name"))
-- describe_table: Get table structure information
+- list_databases: List all available databases - Use list_databases()
+- use_database: Switch to a specific database - Use use_database(database_name="database_name")
+- query: Execute SQL queries (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, etc.) - Use query(sql="SELECT * FROM table", database="database_name")
+- list_tables: List all tables in the current or specified database - Use list_tables(database="database_name")
+- describe_table: Get table structure information - Use describe_table(table_name="table_name", database="database_name")
+- get_current_database: Get the name of the currently connected database - Use get_current_database()
 
 IMPORTANT: 
-1. When using query or list_tables, ALWAYS pass the database parameter: query(sql="...", database="database_name") or list_tables(database="database_name")
-2. This ensures you get results from the correct database, not the default one.
-3. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
+1. For database list requests, use list_databases()
+2. For table list requests, use list_tables(database="database_name")
+3. For table structure requests, use describe_table(table_name="table_name", database="database_name")
+4. Always specify the database parameter when available
+5. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
 
 Always provide the exact tool calls needed for the user's request."""
 

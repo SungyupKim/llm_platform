@@ -179,9 +179,9 @@ class StreamingAgent:
             
             # Create the tool with explicit function signatures for specific tools
             if tool_name == "query":
-                # Create query tool with explicit sql parameter
-                def query_tool(sql: str) -> str:
-                    return tool_func(sql=sql)
+                # Create query tool with explicit sql and database parameters
+                def query_tool(sql: str, database: str = None) -> str:
+                    return tool_func(sql=sql, database=database)
                 
                 query_tool.__name__ = tool_name
                 query_tool.__doc__ = tool_description
@@ -194,6 +194,26 @@ class StreamingAgent:
                 list_dir_tool.__name__ = tool_name
                 list_dir_tool.__doc__ = tool_description
                 langchain_tool = tool(list_dir_tool)
+            # Skip use_database tool as it's not needed with explicit parameter passing
+            elif tool_name == "list_tables":
+                # Create list_tables tool with explicit database parameter
+                def list_tables_tool(database: str = None) -> str:
+                    if database:
+                        return tool_func(database=database)
+                    else:
+                        return tool_func()
+                
+                list_tables_tool.__name__ = tool_name
+                list_tables_tool.__doc__ = tool_description
+                langchain_tool = tool(list_tables_tool)
+            elif tool_name == "get_current_database":
+                # Create get_current_database tool with no parameters
+                def get_current_db_tool() -> str:
+                    return tool_func()
+                
+                get_current_db_tool.__name__ = tool_name
+                get_current_db_tool.__doc__ = tool_description
+                langchain_tool = tool(get_current_db_tool)
             else:
                 # Create the tool with proper schema for other tools
                 langchain_tool = tool(tool_func)
@@ -256,6 +276,14 @@ class StreamingAgent:
         # Add edges
         workflow.add_edge("direct_response", END)
         workflow.add_edge("final_response", END)
+        
+        # Create LLM with tools
+        if self.tools:
+            self.llm_with_tools = self.llm.bind_tools(self.tools)
+            logger.info(f"✅ LLM bound with {len(self.tools)} tools")
+        else:
+            self.llm_with_tools = self.llm
+            logger.warning("⚠️ No tools available, using LLM without tools")
         
         # Compile the graph
         self.graph = workflow.compile()
@@ -395,19 +423,28 @@ Be conversational, friendly, and informative. When users ask for multiple tasks,
         
         try:
             # Add system message with tool guidance
-            system_message = """You are a helpful AI assistant with access to various tools. When users ask for specific information that requires tools, use them appropriately.
+            tool_descriptions = []
+            for tool in self.tools:
+                tool_descriptions.append(f"- {tool.name}: {tool.description}")
+            
+            tools_text = "\n".join(tool_descriptions) if tool_descriptions else "No tools available"
+            
+            system_message = f"""You are a helpful AI assistant with access to various tools. When users ask for specific information that requires tools, use them appropriately.
 
 Available tools:
-- query: Execute SQL queries on PostgreSQL database (use for database operations)
-- list_directory: List files and directories (use for file system exploration)
-- read_text_file: Read file contents (use for reading files)
-- brave_web_search: Search the web (use for current information)
+{tools_text}
 
-For database queries, use the query tool with proper SQL. For example:
-- To list tables: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
-- To get database version: "SELECT version();"
+For database operations, use the appropriate tools:
+- query: Execute SQL queries (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, etc.) - ALWAYS pass database parameter: query(sql="SELECT * FROM table", database="database_name")
+- list_tables: List tables in the current or specified database (ALWAYS pass database parameter: list_tables(database="database_name"))
+- describe_table: Get table structure information
 
-Always provide the exact SQL query needed for the user's request."""
+IMPORTANT: 
+1. When using query or list_tables, ALWAYS pass the database parameter: query(sql="...", database="database_name") or list_tables(database="database_name")
+2. This ensures you get results from the correct database, not the default one.
+3. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
+
+Always provide the exact tool calls needed for the user's request."""
 
             # Create messages with system guidance
             messages_with_system = [{"role": "system", "content": system_message}] + state["messages"]

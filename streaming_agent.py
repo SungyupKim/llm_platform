@@ -38,6 +38,9 @@ class StreamingAgent:
         self.tool_node = None
         self.llm_with_tools = None
         
+        # Tool to server mapping
+        self.tool_server_mapping = {}
+        
         # MCP initialization state
         self._mcp_initialized = False
         
@@ -194,6 +197,26 @@ class StreamingAgent:
                 list_dir_tool.__name__ = tool_name
                 list_dir_tool.__doc__ = tool_description
                 langchain_tool = tool(list_dir_tool)
+            elif tool_name in ["add", "multiply", "divide"]:
+                # Create calculator tools with explicit parameters
+                if tool_name == "add":
+                    def add_tool(a: float, b: float) -> str:
+                        return tool_func(a=a, b=b)
+                    add_tool.__name__ = tool_name
+                    add_tool.__doc__ = tool_description
+                    langchain_tool = tool(add_tool)
+                elif tool_name == "multiply":
+                    def multiply_tool(a: float, b: float) -> str:
+                        return tool_func(a=a, b=b)
+                    multiply_tool.__name__ = tool_name
+                    multiply_tool.__doc__ = tool_description
+                    langchain_tool = tool(multiply_tool)
+                elif tool_name == "divide":
+                    def divide_tool(a: float, b: float) -> str:
+                        return tool_func(a=a, b=b)
+                    divide_tool.__name__ = tool_name
+                    divide_tool.__doc__ = tool_description
+                    langchain_tool = tool(divide_tool)
             # Skip use_database tool as it's not needed with explicit parameter passing
             elif tool_name == "list_tables":
                 # Create list_tables tool with explicit database parameter
@@ -218,7 +241,10 @@ class StreamingAgent:
                 # Create the tool with proper schema for other tools
                 langchain_tool = tool(tool_func)
             
-            logger.debug(f"✅ Created LangChain tool: {langchain_tool.name}")
+            # Store server information in a separate mapping
+            self.tool_server_mapping[langchain_tool.name] = server_name
+            
+            logger.debug(f"✅ Created LangChain tool: {langchain_tool.name} (server: {server_name})")
             return langchain_tool
             
         except Exception as e:
@@ -348,6 +374,12 @@ Examples:
 - "Show database tables" -> YES (needs query tool with SQL)
 - "Read a file" -> YES (needs read_text_file tool)
 - "Search for information" -> YES (needs brave_web_search tool)
+- "Calculate 10 + 5" -> YES (needs add tool)
+- "What is 7 times 8?" -> YES (needs multiply tool)
+- "Divide 20 by 4" -> YES (needs divide tool)
+- "10 더하기 5" -> YES (needs add tool)
+- "7 곱하기 8" -> YES (needs multiply tool)
+- "20 나누기 4" -> YES (needs divide tool)
 - "What is the weather?" -> NO (direct response)
 - "Hello, how are you?" -> NO (direct response)
 - "Database table list" -> YES (needs query tool with SQL)
@@ -442,12 +474,18 @@ For database operations, use the appropriate tools:
 - describe_table: Get table structure information - Use describe_table(table_name="table_name", database="database_name")
 - get_current_database: Get the name of the currently connected database - Use get_current_database()
 
+For calculator operations, use the appropriate tools:
+- add: Add two numbers together - Use add(a=10, b=5) for "10 + 5"
+- multiply: Multiply two numbers together - Use multiply(a=7, b=8) for "7 × 8"
+- divide: Divide first number by second number - Use divide(a=20, b=4) for "20 ÷ 4"
+
 IMPORTANT: 
 1. For database list requests, use list_databases()
 2. For table list requests, use list_tables(database="database_name")
 3. For table structure requests, use describe_table(table_name="table_name", database="database_name")
-4. Always specify the database parameter when available
-5. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
+4. For calculation requests, use the appropriate calculator tool (add, multiply, divide)
+5. Always specify the database parameter when available
+6. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
 
 Always provide the exact tool calls needed for the user's request."""
 
@@ -530,9 +568,10 @@ Always provide the exact tool calls needed for the user's request."""
         }
         
         try:
+            # Build graph if not already built (even without tools)
             if not self.graph:
-                yield {"type": "error", "message": "Graph not initialized. No tools available."}
-                return
+                self._build_graph()
+                logger.info("✅ Graph built successfully")
             
             # Run the graph with streaming updates
             async for update in self._stream_graph_execution(state):

@@ -224,30 +224,43 @@ class McpClientManager:
                             import sys
                             
                             try:
-                                # Check if we have a persistent MCP server process
-                                if not hasattr(self, '_mcp_process') or self._mcp_process.poll() is not None:
-                                    # Start a new persistent MCP server process
+                                # Check if we have a persistent MCP server process for this server
+                                process_key = f'_mcp_process_{server_name}'
+                                if not hasattr(self, process_key) or getattr(self, process_key).poll() is not None:
+                                    # Start a new persistent MCP server process for the specific server
                                     env = os.environ.copy()
-                                    env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
                                     
-                                    self._mcp_process = subprocess.Popen(
-                                        [sys.executable, "/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"],
+                                    # Determine the correct MCP server script based on server_name
+                                    if server_name == "calculator":
+                                        server_script = "/home/ubuntu/llm_agent/calculator_mcp.py"
+                                    elif server_name == "postgres":
+                                        server_script = "/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"
+                                        env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
+                                    else:
+                                        # For other servers, we need to handle them differently
+                                        return f"Error: Unsupported server for sync call: {server_name}"
+                                    
+                                    mcp_process = subprocess.Popen(
+                                        [sys.executable, server_script],
                                         stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
                                         text=True,
                                         env=env
                                     )
+                                    setattr(self, process_key, mcp_process)
+                                
+                                mcp_process = getattr(self, process_key)
                                 
                                 # Send the request to the persistent process
-                                self._mcp_process.stdin.write(tool_call_msg.strip() + '\n')
-                                self._mcp_process.stdin.flush()
+                                mcp_process.stdin.write(tool_call_msg.strip() + '\n')
+                                mcp_process.stdin.flush()
                                 
                                 # Read responses until we get the one with matching ID
                                 max_attempts = 10
                                 for attempt in range(max_attempts):
                                     try:
-                                        line = self._mcp_process.stdout.readline()
+                                        line = mcp_process.stdout.readline()
                                         if not line:
                                             break
                                         
@@ -277,14 +290,14 @@ class McpClientManager:
                                         print(f"❌ Error reading response: {e}")
                                         break
                                 
-                                if self._mcp_process.poll() is not None:
+                                if mcp_process.poll() is not None:
                                     return f"Error: MCP server process terminated"
                                 
                                 return f"Tool {tool_name} executed with arguments {arguments}"
                                 
                             except subprocess.TimeoutExpired:
-                                if hasattr(self, '_mcp_process'):
-                                    self._mcp_process.kill()
+                                if hasattr(self, process_key):
+                                    getattr(self, process_key).kill()
                                 return f"Error: MCP server timeout"
                             except Exception as e:
                                 print(f"❌ Error in call_tool_sync: {e}")
@@ -418,7 +431,7 @@ class McpClientManager:
                 "result": result,
                 "server": server_name,
                 "tool": tool_name,
-            "mode": "real"
+                "mode": "real"
             }
         except Exception as e:
             print(f"❌ Real MCP tool call failed for {server_name}.{tool_name}: {e}")

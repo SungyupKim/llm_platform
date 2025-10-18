@@ -123,10 +123,15 @@ class McpClientManager:
                             import json
                             try:
                                 data = json.loads(response.decode())
+                                print(f"🔍 Parsed JSON data: {data}")
                                 if "result" in data and "tools" in data["result"]:
                                     self.tools = data["result"]["tools"]
+                                    print(f"🔍 Successfully parsed {len(self.tools)} tools for {server_name}")
                                     return type('obj', (object,), {'tools': self.tools})()
-                            except:
+                                else:
+                                    print(f"🔍 No tools found in response for {server_name}")
+                            except Exception as e:
+                                print(f"🔍 Error parsing tools response for {server_name}: {e}")
                                 pass
                             
                             # Fallback tools based on server name
@@ -214,6 +219,9 @@ class McpClientManager:
                     
                     session = SimpleSession(process)
                     await session.initialize()
+                    
+                    # Small delay to ensure server is ready
+                    await asyncio.sleep(0.1)
                     
                     # Get available tools from the server
                     tools_result = await session.list_tools()

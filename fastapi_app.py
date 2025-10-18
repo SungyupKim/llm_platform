@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from typing import List, Dict, Any, AsyncGenerator
 import asyncio
@@ -11,6 +12,7 @@ import logging
 from streaming_agent import StreamingAgent
 from bedrock_client import bedrock_client
 from config import Config
+from rag_system import RAGSystem
 
 # Configure logging
 logging.basicConfig(
@@ -24,13 +26,17 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="LLM Agent API", description="Streaming LLM Agent with Tool Support")
+app = FastAPI(title="LLM Agent API", description="Streaming LLM Agent with Tool Support and RAG")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Global agent instance
+# Templates
+templates = Jinja2Templates(directory="templates")
+
+# Global instances
 agent = None
+rag_system = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -42,15 +48,19 @@ class ChatResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the agent on startup"""
-    global agent
+    """Initialize the agent and RAG system on startup"""
+    global agent, rag_system
     try:
         logger.info("✅ Initializing ChatBedrock...")
         logger.info("✅ AWS credentials verified")
         agent = StreamingAgent()
         logger.info("🚀 Agent initialized successfully")
+        
+        logger.info("✅ Initializing RAG System...")
+        rag_system = RAGSystem()
+        logger.info("🚀 RAG System initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize agent: {e}")
+        logger.error(f"❌ Failed to initialize systems: {e}")
         raise e
 
 @app.on_event("shutdown")
@@ -112,8 +122,8 @@ async def stream_agent_response(message: str, conversation_history: List[Dict[st
 
 @app.get("/")
 async def root():
-    """Serve the chat interface"""
-    return FileResponse("static/index.html")
+    """Serve the main interface with navigation"""
+    return templates.TemplateResponse("main.html", {"request": {}})
 
 @app.get("/api")
 async def api_info():
@@ -185,6 +195,150 @@ async def chat_simple(request: ChatRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# RAG System Routes
+@app.get("/rag")
+async def rag_interface():
+    """Serve the RAG interface"""
+    return templates.TemplateResponse("rag.html", {"request": {}})
+
+@app.post("/rag/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    """Upload and process PDF file"""
+    if not rag_system:
+        raise HTTPException(status_code=500, detail="RAG system not initialized")
+    
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    
+    try:
+        # Read file content
+        content = await file.read()
+        
+        # Process PDF using bytes method
+        result = await rag_system.process_pdf_bytes(content, file.filename)
+        
+        if result.get("success", False):
+            return {
+                "message": result.get("message", f"PDF '{file.filename}' processed successfully"),
+                "chunks_created": result.get("chunks_created", 0),
+                "total_chunks": result.get("total_chunks", 0)
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error", "PDF processing failed"))
+            
+    except Exception as e:
+        logger.error(f"Error processing PDF: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+
+@app.post("/rag/search")
+async def search_documents(query: str = Form(...), k: int = Form(5)):
+    """Search documents using RAG"""
+    if not rag_system:
+        raise HTTPException(status_code=500, detail="RAG system not initialized")
+    
+    try:
+        results = await rag_system.search(query, n_results=k)
+        return {
+            "query": query,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"Error searching documents: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching documents: {str(e)}")
+
+@app.get("/rag/collection-info")
+async def get_collection_info():
+    """Get collection information"""
+    if not rag_system:
+        raise HTTPException(status_code=500, detail="RAG system not initialized")
+    
+    try:
+        info = rag_system.get_collection_info()
+        return info
+    except Exception as e:
+        logger.error(f"Error getting collection info: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting collection info: {str(e)}")
+
+@app.post("/rag/reset")
+async def reset_collection():
+    """Reset the collection"""
+    if not rag_system:
+        raise HTTPException(status_code=500, detail="RAG system not initialized")
+    
+    try:
+        await rag_system.reset_collection()
+        return {"message": "Collection reset successfully"}
+    except Exception as e:
+        logger.error(f"Error resetting collection: {e}")
+        raise HTTPException(status_code=500, detail=f"Error resetting collection: {str(e)}")
+
+@app.post("/rag/chat")
+async def rag_chat(query: str = Form(...), n_results: int = Form(3)):
+    """RAG 기반 채팅 - 검색된 문서를 참조하여 LLM이 답변 생성"""
+    if not rag_system:
+        raise HTTPException(status_code=500, detail="RAG system not initialized")
+    
+    try:
+        result = await rag_system.rag_chat(query, n_results=n_results)
+        return result
+    except Exception as e:
+        logger.error(f"Error in RAG chat: {e}")
+        raise HTTPException(status_code=500, detail=f"Error in RAG chat: {str(e)}")
+
+async def stream_rag_response(query: str, n_results: int = 3) -> AsyncGenerator[str, None]:
+    """Stream RAG response as Server-Sent Events"""
+    logger.info(f"📨 RAG streaming request: {query[:100]}...")
+    
+    if not rag_system:
+        logger.error("❌ RAG system not initialized")
+        yield f"data: {json.dumps({'type': 'error', 'message': 'RAG system not initialized'})}\n\n"
+        return
+    
+    try:
+        # Stream the RAG response
+        logger.info("🚀 Starting RAG streaming...")
+        async for update in rag_system.rag_chat_stream(query, n_results=n_results):
+            logger.debug(f"📤 RAG streaming update: {update['type']}")
+            
+            if update["type"] == "search_start":
+                yield f"data: {json.dumps({'type': 'search_start', 'message': update['message']})}\n\n"
+            elif update["type"] == "search_complete":
+                yield f"data: {json.dumps({'type': 'search_complete', 'message': update['message'], 'sources': update.get('sources', [])})}\n\n"
+            elif update["type"] == "generation_start":
+                yield f"data: {json.dumps({'type': 'generation_start', 'message': update['message']})}\n\n"
+            elif update["type"] == "stream":
+                yield f"data: {json.dumps({'type': 'stream', 'chunk': update['chunk']})}\n\n"
+            elif update["type"] == "response_complete":
+                logger.info("✅ RAG response complete")
+                yield f"data: {json.dumps({'type': 'response_complete', 'message': update['message'], 'sources': update.get('sources', []), 'query': update.get('query', ''), 'total_sources': update.get('total_sources', 0)})}\n\n"
+            elif update["type"] == "error":
+                logger.error(f"❌ RAG error: {update['message']}")
+                yield f"data: {json.dumps({'type': 'error', 'message': update['message']})}\n\n"
+            
+            # Small delay to prevent overwhelming the client
+            await asyncio.sleep(0.01)
+        
+        logger.info("🏁 RAG streaming completed")
+    
+    except Exception as e:
+        logger.error(f"❌ RAG streaming error: {str(e)}")
+        yield f"data: {json.dumps({'type': 'error', 'message': f'Error: {str(e)}'})}\n\n"
+
+@app.post("/rag/chat/stream")
+async def rag_chat_stream(query: str = Form(...), n_results: int = Form(3)):
+    """RAG 기반 스트리밍 채팅 - 검색된 문서를 참조하여 LLM이 스트리밍으로 답변 생성"""
+    return StreamingResponse(
+        stream_rag_response(query, n_results),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "*"
+        }
+    )
 
 if __name__ == "__main__":
     # Configure uvicorn logging

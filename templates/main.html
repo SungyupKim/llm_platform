@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Agent & RAG System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 600px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .menu-item {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 15px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .menu-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .menu-item.agent {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .menu-item.rag {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+
+        .menu-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .menu-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .menu-description {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+
+        .status {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .status-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .status-label {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .status-value {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .footer {
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .menu-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🤖 LLM Agent</div>
+        <div class="subtitle">AI Agent & RAG System 통합 플랫폼</div>
+        
+        <div class="menu-grid">
+            <a href="/static/index.html" class="menu-item agent">
+                <div class="menu-icon">💬</div>
+                <div class="menu-title">AI Agent</div>
+                <div class="menu-description">
+                    도구를 활용한<br>
+                    지능형 대화 시스템
+                </div>
+            </a>
+            
+            <a href="/rag" class="menu-item rag">
+                <div class="menu-icon">📚</div>
+                <div class="menu-title">RAG System</div>
+                <div class="menu-description">
+                    PDF 문서 기반<br>
+                    검색 및 질의응답
+                </div>
+            </a>
+        </div>
+        
+        <div class="status">
+            <div class="status-item">
+                <span class="status-label">AI Agent 상태</span>
+                <span class="status-value" id="agent-status">확인 중...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">RAG System 상태</span>
+                <span class="status-value" id="rag-status">확인 중...</span>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>🚀 Powered by AWS Bedrock & LangChain</p>
+        </div>
+    </div>
+
+    <script>
+        // Check system status
+        async function checkStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                document.getElementById('agent-status').textContent = 
+                    data.agent_initialized ? '✅ 정상' : '❌ 오류';
+                document.getElementById('agent-status').style.color = 
+                    data.agent_initialized ? '#28a745' : '#dc3545';
+            } catch (error) {
+                document.getElementById('agent-status').textContent = '❌ 연결 실패';
+                document.getElementById('agent-status').style.color = '#dc3545';
+            }
+            
+            try {
+                const response = await fetch('/rag/collection-info');
+                const data = await response.json();
+                
+                document.getElementById('rag-status').textContent = '✅ 정상';
+                document.getElementById('rag-status').style.color = '#28a745';
+            } catch (error) {
+                document.getElementById('rag-status').textContent = '❌ 오류';
+                document.getElementById('rag-status').style.color = '#dc3545';
+            }
+        }
+        
+        // Check status on page load
+        checkStatus();
+        
+        // Check status every 30 seconds
+        setInterval(checkStatus, 30000);
+    </script>
+</body>
+</html>

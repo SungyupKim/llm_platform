@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG System - PDF 문서 검색</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .nav {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .nav a {
+            color: #495057;
+            text-decoration: none;
+            font-weight: 500;
+            margin-right: 20px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .nav a:hover {
+            background: #e9ecef;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .upload-area {
+            border: 2px dashed #43e97b;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            background: #f8fff9;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #38f9d7;
+            background: #f0fffe;
+        }
+
+        .upload-area.dragover {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #43e97b;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(67, 233, 123, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #43e97b;
+        }
+
+        .results {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .result-item {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .result-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .result-score {
+            background: #43e97b;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+
+        .result-content {
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .result-metadata {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .status {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #1976d2;
+        }
+
+        .error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #c62828;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #43e97b;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .collection-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .info-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-label {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .info-value {
+            color: #43e97b;
+            font-weight: bold;
+        }
+
+        .chat-answer {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .answer-content {
+            color: #333;
+            line-height: 1.6;
+            font-size: 1rem;
+        }
+        
+        .sources-section {
+            margin-top: 20px;
+        }
+        
+        .sources-section h4 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+        
+        .source-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            border-left: 3px solid #43e97b;
+        }
+        
+        .source-score {
+            background: #43e97b;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+        
+        .source-content {
+            color: #333;
+            line-height: 1.5;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .source-metadata {
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        @media (max-width: 768px) {
+            .search-form {
+                flex-direction: column;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 RAG System</h1>
+            <p>PDF 문서 업로드 및 지능형 검색 시스템</p>
+        </div>
+        
+        <div class="nav">
+            <a href="/">🏠 메인으로</a>
+            <a href="/static/index.html">💬 AI Agent</a>
+        </div>
+        
+        <div class="content">
+            <!-- Collection Info -->
+            <div class="section">
+                <h2>📊 컬렉션 정보</h2>
+                <div class="collection-info" id="collection-info">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        컬렉션 정보를 불러오는 중...
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Upload Section -->
+            <div class="section">
+                <h2>📤 PDF 업로드</h2>
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">
+                        PDF 파일을 드래그하거나 클릭하여 업로드하세요
+                    </div>
+                    <input type="file" id="file-input" class="file-input" accept=".pdf">
+                    <button class="btn" onclick="document.getElementById('file-input').click()">
+                        파일 선택
+                    </button>
+                </div>
+                <div id="upload-status"></div>
+            </div>
+            
+            <!-- Search Section -->
+            <div class="section">
+                <h2>🔍 문서 검색</h2>
+                <form class="search-form" id="search-form">
+                    <input type="text" id="search-input" class="search-input" 
+                           placeholder="검색할 내용을 입력하세요..." required>
+                    <button type="submit" class="btn">검색</button>
+                </form>
+                <div id="search-results"></div>
+            </div>
+            
+            <!-- RAG Chat Section -->
+            <div class="section">
+                <h2>💬 RAG 기반 AI 채팅</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    업로드된 문서를 참조하여 AI가 답변을 생성합니다.
+                </p>
+                <form class="search-form" id="chat-form">
+                    <input type="text" id="chat-input" class="search-input" 
+                           placeholder="문서에 대해 질문해보세요..." required>
+                    <button type="submit" class="btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">AI에게 질문</button>
+                </form>
+                <div id="chat-results"></div>
+            </div>
+            
+            <!-- Reset Section -->
+            <div class="section">
+                <h2>🗑️ 컬렉션 초기화</h2>
+                <button class="btn" onclick="resetCollection()" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+                    모든 문서 삭제
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load collection info on page load
+        loadCollectionInfo();
+        
+        // File upload handling
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        const uploadStatus = document.getElementById('upload-status');
+        
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+        
+        // Search form handling
+        document.getElementById('search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('search-input').value;
+            if (query.trim()) {
+                await searchDocuments(query);
+            }
+        });
+        
+        // Chat form handling
+        document.getElementById('chat-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('chat-input').value;
+            if (query.trim()) {
+                await ragChat(query);
+            }
+        });
+        
+        async function loadCollectionInfo() {
+            try {
+                const response = await fetch('/rag/collection-info');
+                const data = await response.json();
+                
+                document.getElementById('collection-info').innerHTML = `
+                    <div class="info-item">
+                        <span class="info-label">총 문서 수</span>
+                        <span class="info-value">${data.total_documents || 0}개</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">총 청크 수</span>
+                        <span class="info-value">${data.total_chunks || 0}개</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">컬렉션 이름</span>
+                        <span class="info-value">${data.collection_name || 'N/A'}</span>
+                    </div>
+                `;
+            } catch (error) {
+                document.getElementById('collection-info').innerHTML = `
+                    <div class="error">컬렉션 정보를 불러올 수 없습니다: ${error.message}</div>
+                `;
+            }
+        }
+        
+        async function handleFileUpload(file) {
+            if (!file.name.endsWith('.pdf')) {
+                showStatus('error', 'PDF 파일만 업로드할 수 있습니다.');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            showStatus('loading', 'PDF를 처리하는 중...');
+            
+            try {
+                const response = await fetch('/rag/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('success', `✅ ${result.message} (${result.chunks_created}개 청크 생성, 총 ${result.total_chunks}개 청크)`);
+                    loadCollectionInfo(); // Refresh collection info
+                } else {
+                    showStatus('error', `❌ 오류: ${result.detail}`);
+                }
+            } catch (error) {
+                showStatus('error', `❌ 업로드 실패: ${error.message}`);
+            }
+        }
+        
+        async function searchDocuments(query) {
+            const resultsDiv = document.getElementById('search-results');
+            resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>검색 중...</div>';
+            
+            try {
+                const formData = new FormData();
+                formData.append('query', query);
+                formData.append('k', '5');
+                
+                const response = await fetch('/rag/search', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    displaySearchResults(result);
+                } else {
+                    resultsDiv.innerHTML = `<div class="error">❌ 검색 오류: ${result.detail}</div>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">❌ 검색 실패: ${error.message}</div>`;
+            }
+        }
+        
+        function displaySearchResults(result) {
+            const resultsDiv = document.getElementById('search-results');
+            
+            if (!result.results || result.results.length === 0) {
+                resultsDiv.innerHTML = '<div class="status">검색 결과가 없습니다.</div>';
+                return;
+            }
+            
+            let html = `<div class="results">
+                <h3>🔍 "${result.query}" 검색 결과 (${result.results.length}개)</h3>`;
+            
+            result.results.forEach((item, index) => {
+                const score = item.score ? (item.score * 100).toFixed(1) : '0.0';
+                const filename = item.metadata?.filename || item.metadata?.source_file || 'Unknown';
+                const pageNumber = item.metadata?.page_number || 'N/A';
+                const chunkIndex = item.metadata?.chunk_index || 'N/A';
+                
+                html += `
+                    <div class="result-item">
+                        <div class="result-score">유사도: ${score}%</div>
+                        <div class="result-content">${item.text || item.content || 'No content'}</div>
+                        <div class="result-metadata">
+                            📄 ${filename} | 
+                            📍 페이지: ${pageNumber} | 
+                            📝 청크: ${chunkIndex}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+        }
+        
+        async function ragChat(query) {
+            const resultsDiv = document.getElementById('chat-results');
+            resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>AI가 답변을 생성하는 중...</div>';
+            
+            try {
+                const formData = new FormData();
+                formData.append('query', query);
+                formData.append('n_results', '3');
+                
+                const response = await fetch('/rag/chat/stream', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let fullAnswer = '';
+                let sources = [];
+                let currentStep = '';
+                
+                // 초기 UI 설정
+                resultsDiv.innerHTML = `
+                    <div class="results">
+                        <h3>💬 "${query}" 질문에 대한 AI 답변</h3>
+                        <div class="chat-answer">
+                            <div class="answer-content" id="streaming-answer"></div>
+                        </div>
+                        <div class="sources-section" id="sources-section" style="display: none;">
+                            <h4>📚 참조 문서</h4>
+                            <div id="sources-list"></div>
+                        </div>
+                    </div>
+                `;
+                
+                const answerDiv = document.getElementById('streaming-answer');
+                const sourcesSection = document.getElementById('sources-section');
+                const sourcesList = document.getElementById('sources-list');
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 마지막 불완전한 라인은 버퍼에 보관
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                if (data.type === 'search_start') {
+                                    currentStep = data.message;
+                                    answerDiv.innerHTML = `<div class="loading"><div class="spinner"></div>${currentStep}</div>`;
+                                } else if (data.type === 'search_complete') {
+                                    currentStep = data.message;
+                                    sources = data.sources || [];
+                                    answerDiv.innerHTML = `<div class="loading"><div class="spinner"></div>${currentStep}</div>`;
+                                } else if (data.type === 'generation_start') {
+                                    currentStep = data.message;
+                                    answerDiv.innerHTML = `<div class="loading"><div class="spinner"></div>${currentStep}</div>`;
+                                } else if (data.type === 'stream') {
+                                    fullAnswer += data.chunk;
+                                    answerDiv.innerHTML = fullAnswer;
+                                } else if (data.type === 'response_complete') {
+                                    // 최종 답변과 소스 표시
+                                    answerDiv.innerHTML = data.message;
+                                    sources = data.sources || [];
+                                    
+                                    if (sources.length > 0) {
+                                        sourcesSection.style.display = 'block';
+                                        sourcesSection.querySelector('h4').textContent = `📚 참조 문서 (${data.total_sources || sources.length}개)`;
+                                        
+                                        let sourcesHtml = '';
+                                        sources.forEach((source, index) => {
+                                            const score = source.score ? (source.score * 100).toFixed(1) : '0.0';
+                                            sourcesHtml += `
+                                                <div class="source-item">
+                                                    <div class="source-score">유사도: ${score}%</div>
+                                                    <div class="source-content">${source.text}</div>
+                                                    <div class="source-metadata">
+                                                        📄 ${source.filename} | 📝 청크: ${source.chunk_index}
+                                                    </div>
+                                                </div>
+                                            `;
+                                        });
+                                        sourcesList.innerHTML = sourcesHtml;
+                                    }
+                                } else if (data.type === 'error') {
+                                    resultsDiv.innerHTML = `<div class="error">❌ 오류: ${data.message}</div>`;
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e);
+                            }
+                        }
+                    }
+                }
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">❌ 채팅 실패: ${error.message}</div>`;
+            }
+        }
+        
+        function displayChatResults(result) {
+            const resultsDiv = document.getElementById('chat-results');
+            
+            let html = `<div class="results">
+                <h3>💬 "${result.query}" 질문에 대한 AI 답변</h3>
+                <div class="chat-answer">
+                    <div class="answer-content">${result.answer}</div>
+                </div>`;
+            
+            if (result.sources && result.sources.length > 0) {
+                html += `
+                    <div class="sources-section">
+                        <h4>📚 참조 문서 (${result.total_sources}개)</h4>`;
+                
+                result.sources.forEach((source, index) => {
+                    const score = source.score ? (source.score * 100).toFixed(1) : '0.0';
+                    html += `
+                        <div class="source-item">
+                            <div class="source-score">유사도: ${score}%</div>
+                            <div class="source-content">${source.text}</div>
+                            <div class="source-metadata">
+                                📄 ${source.filename} | 📝 청크: ${source.chunk_index}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+        }
+        
+        async function resetCollection() {
+            if (!confirm('정말로 모든 문서를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/rag/reset', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('success', '✅ 컬렉션이 초기화되었습니다.');
+                    loadCollectionInfo();
+                    document.getElementById('search-results').innerHTML = '';
+                } else {
+                    showStatus('error', `❌ 초기화 오류: ${result.detail}`);
+                }
+            } catch (error) {
+                showStatus('error', `❌ 초기화 실패: ${error.message}`);
+            }
+        }
+        
+        function showStatus(type, message) {
+            const statusDiv = document.getElementById('upload-status');
+            const className = type === 'error' ? 'error' : type === 'loading' ? 'loading' : 'status';
+            statusDiv.innerHTML = `<div class="${className}">${message}</div>`;
+            
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 5000);
+            }
+        }
+    </script>
+</body>
+</html>

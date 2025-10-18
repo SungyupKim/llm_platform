@@ -142,8 +142,21 @@ class McpClientManager:
                                 ]
                             elif server_name == "postgres":
                                 self.tools = [
-                                    {"name": "query", "description": "Execute SQL query"},
-                                    {"name": "list_tables", "description": "List all tables in the database"}
+                                    {"name": "postgres_list_databases", "description": "List all available PostgreSQL databases"},
+                                    {"name": "postgres_use_database", "description": "Switch to a specific PostgreSQL database"},
+                                    {"name": "postgres_query", "description": "Execute SQL query on PostgreSQL"},
+                                    {"name": "postgres_list_tables", "description": "List all tables in the PostgreSQL database"},
+                                    {"name": "postgres_describe_table", "description": "Get detailed information about a PostgreSQL table structure"},
+                                    {"name": "postgres_get_current_database", "description": "Get the name of the currently connected PostgreSQL database"}
+                                ]
+                            elif server_name == "mysql":
+                                self.tools = [
+                                    {"name": "mysql_list_databases", "description": "List all available MySQL databases"},
+                                    {"name": "mysql_use_database", "description": "Switch to a specific MySQL database"},
+                                    {"name": "mysql_query", "description": "Execute SQL query on MySQL"},
+                                    {"name": "mysql_list_tables", "description": "List all tables in the MySQL database"},
+                                    {"name": "mysql_describe_table", "description": "Get detailed information about a MySQL table structure"},
+                                    {"name": "mysql_get_current_database", "description": "Get the name of the currently connected MySQL database"}
                                 ]
                             
                             return type('obj', (object,), {'tools': self.tools})()
@@ -305,6 +318,7 @@ class McpClientManager:
         server_scripts = {
             "calculator": f"{base_dir}/calculator_mcp.py",
             "postgres": f"{base_dir}/multi_db_postgres_mcp.py",
+            "mysql": f"{base_dir}/multi_db_mysql_mcp.py",
             "filesystem": None,  # External npm package
             "brave-search": None,  # External npm package
         }
@@ -383,8 +397,11 @@ class McpClientManager:
                     }
                 
                 # Set server-specific environment variables
+                from config import Config
                 if server_name == "postgres":
-                    env["POSTGRES_CONNECTION_STRING"] = "postgresql://test:test@localhost:5432/test"
+                    env["POSTGRES_CONNECTION_STRING"] = Config.MCP_SERVERS["postgres"]["env"]["POSTGRES_CONNECTION_STRING"]
+                elif server_name == "mysql":
+                    env["MYSQL_CONNECTION_STRING"] = Config.MCP_SERVERS["mysql"]["env"]["MYSQL_CONNECTION_STRING"]
                 
                 mcp_process = subprocess.Popen(
                     [sys.executable, server_script],

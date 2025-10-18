@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Multi-Database PostgreSQL MCP Server with Write Permissions
-This server provides full read/write access to multiple PostgreSQL databases
+Multi-Database MySQL MCP Server with Write Permissions
+This server provides full read/write access to multiple MySQL databases
 """
 
 import asyncio
 import json
 import os
 import sys
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import mysql.connector
+from mysql.connector import Error
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
@@ -33,36 +33,35 @@ def get_db_connection(database_name: str = None):
     # Check if connection exists and is still valid
     if database_name in db_connections:
         conn = db_connections[database_name]
-        if conn and not conn.closed:
+        if conn and conn.is_connected():
             return conn
     
     # Create new connection
-    connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
+    connection_string = os.getenv("MYSQL_CONNECTION_STRING")
     if not connection_string:
-        raise ValueError("POSTGRES_CONNECTION_STRING environment variable not set")
+        raise ValueError("MYSQL_CONNECTION_STRING environment variable not set")
     
-    # Parse connection string and modify database
+    # Parse connection string
     import urllib.parse
     parsed = urllib.parse.urlparse(connection_string)
     
     # Always set the database name dynamically
     if database_name == "default":
-        # Use 'postgres' as default database
-        database_name = "postgres"
-    
-    # Create new connection string with the specified database
-    new_parsed = parsed._replace(path=f'/{database_name}')
-    connection_string = urllib.parse.urlunparse(new_parsed)
+        # Use 'test' as default database
+        database_name = "test"
     
     try:
-        conn = psycopg2.connect(
-            connection_string,
-            cursor_factory=RealDictCursor
+        conn = mysql.connector.connect(
+            host=parsed.hostname or 'localhost',
+            port=parsed.port or 3306,
+            user=parsed.username or 'root',
+            password=parsed.password or '',
+            database=database_name,
+            autocommit=True  # Enable autocommit for write operations
         )
-        conn.autocommit = True  # Enable autocommit for write operations
         db_connections[database_name] = conn
         return conn
-    except Exception as e:
+    except Error as e:
         raise ValueError(f"Failed to connect to database '{database_name}': {str(e)}")
 
 async def handle_request(request: dict) -> dict:
@@ -84,7 +83,7 @@ async def handle_request(request: dict) -> dict:
                         "tools": {}
                     },
                     "serverInfo": {
-                        "name": "multi-db-postgres-mcp",
+                        "name": "multi-db-mysql-mcp",
                         "version": "1.0.0"
                     }
                 }
@@ -98,8 +97,8 @@ async def handle_request(request: dict) -> dict:
                 "result": {
                     "tools": [
                         {
-                            "name": "postgres_list_databases",
-                            "description": "List all available PostgreSQL databases",
+                            "name": "mysql_list_databases",
+                            "description": "List all available MySQL databases",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {},
@@ -107,8 +106,8 @@ async def handle_request(request: dict) -> dict:
                             }
                         },
                         {
-                            "name": "postgres_use_database",
-                            "description": "Switch to a specific PostgreSQL database",
+                            "name": "mysql_use_database",
+                            "description": "Switch to a specific MySQL database",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -121,8 +120,8 @@ async def handle_request(request: dict) -> dict:
                             }
                         },
                         {
-                            "name": "postgres_query",
-                            "description": "Execute SQL queries on PostgreSQL (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, etc.) with full read/write permissions",
+                            "name": "mysql_query",
+                            "description": "Execute SQL queries on MySQL (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, etc.) with full read/write permissions",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -139,8 +138,8 @@ async def handle_request(request: dict) -> dict:
                             }
                         },
                         {
-                            "name": "postgres_list_tables",
-                            "description": "List all tables in the current or specified PostgreSQL database",
+                            "name": "mysql_list_tables",
+                            "description": "List all tables in the current or specified MySQL database",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -153,8 +152,8 @@ async def handle_request(request: dict) -> dict:
                             }
                         },
                         {
-                            "name": "postgres_describe_table",
-                            "description": "Get detailed information about a PostgreSQL table structure",
+                            "name": "mysql_describe_table",
+                            "description": "Get detailed information about a MySQL table structure",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -171,8 +170,8 @@ async def handle_request(request: dict) -> dict:
                             }
                         },
                         {
-                            "name": "postgres_get_current_database",
-                            "description": "Get the name of the currently connected PostgreSQL database",
+                            "name": "mysql_get_current_database",
+                            "description": "Get the name of the currently connected MySQL database",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {},
@@ -189,19 +188,19 @@ async def handle_request(request: dict) -> dict:
             
             print(f"🔍 tools/call received: tool_name={tool_name}, arguments={arguments}", file=sys.stderr)
             
-            if tool_name == "postgres_list_databases":
+            if tool_name == "mysql_list_databases":
                 result = await list_databases()
-            elif tool_name == "postgres_use_database":
+            elif tool_name == "mysql_use_database":
                 # Handle both direct argument and kwargs format
                 database_name = arguments.get("database_name") or arguments.get("kwargs", {}).get("database")
                 result = use_database(database_name or "")
-            elif tool_name == "postgres_query":
+            elif tool_name == "mysql_query":
                 result = await execute_query(arguments.get("sql", ""), arguments.get("database"))
-            elif tool_name == "postgres_list_tables":
+            elif tool_name == "mysql_list_tables":
                 result = await list_tables(arguments.get("database"))
-            elif tool_name == "postgres_describe_table":
+            elif tool_name == "mysql_describe_table":
                 result = await describe_table(arguments.get("table_name", ""), arguments.get("database"))
-            elif tool_name == "postgres_get_current_database":
+            elif tool_name == "mysql_get_current_database":
                 result = get_current_database()
             else:
                 result = f"Unknown tool: {tool_name}"
@@ -257,23 +256,22 @@ async def list_databases() -> str:
         conn = get_db_connection()  # Connect to default database
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT datname as database_name, 
-                   pg_size_pretty(pg_database_size(datname)) as size
-            FROM pg_database 
-            WHERE datistemplate = false
-            ORDER BY datname
-        """)
-        
+        cursor.execute("SHOW DATABASES")
         results = cursor.fetchall()
         cursor.close()
         
         if results:
             db_list = []
             for row in results:
-                db_list.append(f"- {row['database_name']} ({row['size']})")
+                db_name = row[0]
+                # Skip system databases
+                if db_name not in ['information_schema', 'performance_schema', 'mysql', 'sys']:
+                    db_list.append(f"- {db_name}")
             
-            result_text = "Available databases:\n" + "\n".join(db_list)
+            if db_list:
+                result_text = "Available databases:\n" + "\n".join(db_list)
+            else:
+                result_text = "No user databases found."
         else:
             result_text = "No databases found."
         
@@ -293,8 +291,8 @@ def use_database(database_name: str) -> dict:
         # Test connection to the database
         conn = get_db_connection(database_name)
         cursor = conn.cursor()
-        cursor.execute("SELECT current_database();")
-        current_db = cursor.fetchone()['current_database']
+        cursor.execute("SELECT DATABASE()")
+        current_db = cursor.fetchone()[0]
         cursor.close()
         
         # Update the current database
@@ -330,10 +328,13 @@ async def execute_query(sql: str, database: str = None) -> str:
         if sql.strip().upper().startswith('SELECT'):
             results = cursor.fetchall()
             if results:
+                # Get column names
+                columns = [desc[0] for desc in cursor.description]
+                
                 # Convert results to JSON-serializable format
                 json_results = []
                 for row in results:
-                    json_results.append(dict(row))
+                    json_results.append(dict(zip(columns, row)))
                 
                 result_text = json.dumps(json_results, indent=2, default=str)
             else:
@@ -355,20 +356,15 @@ async def list_tables(database: str = None) -> str:
         conn = get_db_connection(database)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT table_name, table_type
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """)
-        
+        cursor.execute("SHOW TABLES")
         results = cursor.fetchall()
         cursor.close()
         
         if results:
             table_list = []
             for row in results:
-                table_list.append(f"- {row['table_name']} ({row['table_type']})")
+                table_name = row[0]
+                table_list.append(f"- {table_name}")
             
             result_text = "Tables in the database:\n" + "\n".join(table_list)
         else:
@@ -389,18 +385,7 @@ async def describe_table(table_name: str, database: str = None) -> str:
         cursor = conn.cursor()
         
         # Get column information
-        cursor.execute("""
-            SELECT 
-                column_name,
-                data_type,
-                character_maximum_length,
-                is_nullable,
-                column_default
-            FROM information_schema.columns 
-            WHERE table_name = %s AND table_schema = 'public'
-            ORDER BY ordinal_position
-        """, (table_name,))
-        
+        cursor.execute(f"DESCRIBE {table_name}")
         columns = cursor.fetchall()
         cursor.close()
         
@@ -412,13 +397,16 @@ async def describe_table(table_name: str, database: str = None) -> str:
         
         result_lines.append("Columns:")
         for col in columns:
-            col_info = f"  - {col['column_name']}: {col['data_type']}"
-            if col['character_maximum_length']:
-                col_info += f"({col['character_maximum_length']})"
-            if col['is_nullable'] == 'NO':
+            col_name, col_type, null_allowed, key, default, extra = col
+            col_info = f"  - {col_name}: {col_type}"
+            if null_allowed == 'NO':
                 col_info += " NOT NULL"
-            if col['column_default']:
-                col_info += f" DEFAULT {col['column_default']}"
+            if key == 'PRI':
+                col_info += " PRIMARY KEY"
+            if default:
+                col_info += f" DEFAULT {default}"
+            if extra:
+                col_info += f" {extra}"
             result_lines.append(col_info)
         
         return "\n".join(result_lines)
@@ -428,7 +416,7 @@ async def describe_table(table_name: str, database: str = None) -> str:
 
 async def main():
     """Main function to run the MCP server"""
-    print("🚀 Starting Multi-DB PostgreSQL MCP Server", file=sys.stderr)
+    print("🚀 Starting Multi-DB MySQL MCP Server", file=sys.stderr)
     
     # Test database connection
     try:
@@ -465,5 +453,5 @@ async def main():
             sys.stdout.flush()
 
 if __name__ == "__main__":
-    print("🚀 Multi-DB PostgreSQL MCP Server starting...", file=sys.stderr)
+    print("🚀 Multi-DB MySQL MCP Server starting...", file=sys.stderr)
     asyncio.run(main())

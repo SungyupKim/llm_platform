@@ -31,20 +31,27 @@ class Config:
             }
         },
         "postgres": {
-            "command": "python",
+            "command": "/home/ubuntu/venv/bin/python",
             "args": ["/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"],
             "env": {
                 "POSTGRES_CONNECTION_STRING": os.getenv("POSTGRES_CONNECTION_STRING", "postgresql://test:test@localhost:5432/test")
             }
         },
         "calculator": {
-            "command": "python",
+            "command": "/home/ubuntu/venv/bin/python",
             "args": ["/home/ubuntu/llm_agent/calculator_mcp.py"]
+        },
+        "mysql": {
+            "command": "/home/ubuntu/venv/bin/python",
+            "args": ["/home/ubuntu/llm_agent/multi_db_mysql_mcp.py"],
+            "env": {
+                "MYSQL_CONNECTION_STRING": os.getenv("MYSQL_CONNECTION_STRING", "mysql://test:test@localhost:3306/test")
+            }
         }
     }
     
     # Agent Configuration
-    MAX_ITERATIONS = 10
+    MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "10"))
     SUPERVISOR_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"  # Claude 3.5 Sonnet for supervisor
     WORKER_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"  # Claude 3.5 Sonnet for workers
     

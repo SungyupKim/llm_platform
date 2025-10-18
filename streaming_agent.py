@@ -341,7 +341,8 @@ class StreamingAgent:
     def _should_continue_after_tools(self, state: StreamingAgentState) -> str:
         """Determine if we should continue after tool execution"""
         # Prevent infinite loops
-        max_iterations = 5
+        from config import Config
+        max_iterations = Config.MAX_ITERATIONS
         current_iterations = state.get("iteration_count", 0)
         
         if current_iterations >= max_iterations:

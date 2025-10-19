@@ -10,7 +10,6 @@ import uvicorn
 import os
 import logging
 from streaming_agent import StreamingAgent
-from bedrock_client import bedrock_client
 from config import Config
 from rag_system import RAGSystem
 
@@ -216,7 +215,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         content = await file.read()
         
         # Process PDF using bytes method
-        result = await rag_system.process_pdf_bytes(content, file.filename)
+        result = rag_system.process_pdf_bytes(content, file.filename)
         
         if result.get("success", False):
             return {
@@ -339,6 +338,50 @@ async def rag_chat_stream(query: str = Form(...), n_results: int = Form(3)):
             "Access-Control-Allow-Methods": "*"
         }
     )
+
+# Agent Chat with File Upload
+@app.post("/chat/upload")
+async def chat_upload_file(file: UploadFile = File(...)):
+    """Upload PDF file for Agent chat - integrates with RAG MCP"""
+    if not file.filename.endswith('.pdf'):
+        return {
+            "success": False,
+            "error": "Only PDF files are allowed"
+        }
+    
+    try:
+        # Read file content
+        content = await file.read()
+        
+        # Process PDF using RAG system
+        if rag_system:
+            result = rag_system.process_pdf_bytes(content, file.filename)
+            
+            if result.get("success", False):
+                return {
+                    "success": True,
+                    "message": f"PDF '{file.filename}' uploaded and processed successfully",
+                    "chunks_created": result.get("chunks_created", 0),
+                    "total_chunks": result.get("total_chunks", 0),
+                    "filename": file.filename
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": result.get("error", "PDF processing failed")
+                }
+        else:
+            return {
+                "success": False,
+                "error": "RAG system not initialized"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error processing PDF in chat upload: {e}")
+        return {
+            "success": False,
+            "error": f"Error processing PDF: {str(e)}"
+        }
 
 if __name__ == "__main__":
     # Configure uvicorn logging

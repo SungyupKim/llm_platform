@@ -327,8 +327,8 @@ class McpClientManager:
             "calculator": f"{base_dir}/calculator_mcp.py",
             "postgres": f"{base_dir}/multi_db_postgres_mcp.py",
             "mysql": f"{base_dir}/multi_db_mysql_mcp.py",
+            "rag": f"{base_dir}/rag_mcp.py",
             "filesystem": None,  # External npm package
-            "brave-search": None,  # External npm package
         }
         
         script_path = server_scripts.get(server_name)

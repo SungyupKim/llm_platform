@@ -240,7 +240,7 @@ class RAGSystem:
         logger.info(f"텍스트를 {len(chunk_docs)}개 청크로 분할")
         return chunk_docs
     
-    async def embed_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def embed_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         청크들을 임베딩으로 변환
         
@@ -255,7 +255,7 @@ class RAGSystem:
             texts = [chunk["text"] for chunk in chunks]
             
             # 임베딩 생성
-            embeddings = await self.embeddings.aembed_documents(texts)
+            embeddings = self.embeddings.embed_documents(texts)
             
             # 임베딩을 청크에 추가
             for i, chunk in enumerate(chunks):
@@ -364,7 +364,7 @@ class RAGSystem:
                 }
             
             # 임베딩 생성
-            chunks_with_embeddings = await self.embed_chunks(chunks)
+            chunks_with_embeddings = self.embed_chunks(chunks)
             
             # 메타데이터 준비
             if document_metadata is None:
@@ -406,7 +406,7 @@ class RAGSystem:
                 "total_chunks": 0
             }
     
-    async def process_pdf_bytes(self, pdf_bytes: bytes, filename: str,
+    def process_pdf_bytes(self, pdf_bytes: bytes, filename: str,
                                document_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         PDF 바이트 데이터를 처리하여 RAG 시스템에 추가
@@ -454,7 +454,7 @@ class RAGSystem:
                     }
                 
                 # 임베딩 생성
-                chunks_with_embeddings = await self.embed_chunks(chunks)
+                chunks_with_embeddings = self.embed_chunks(chunks)
                 
                 # 메타데이터 준비
                 if document_metadata is None:
@@ -501,7 +501,7 @@ class RAGSystem:
                 "total_chunks": 0
             }
     
-    async def search(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """
         RAG 검색 수행
         
@@ -514,7 +514,7 @@ class RAGSystem:
         """
         try:
             # 쿼리 임베딩 생성
-            query_embedding = await self.embeddings.aembed_query(query)
+            query_embedding = self.embeddings.embed_query(query)
             
             # ChromaDB에서 검색
             results = self.collection.query(
@@ -548,7 +548,7 @@ class RAGSystem:
             logger.error(f"검색 오류: {e}")
             return []
     
-    async def rag_chat(self, query: str, n_results: int = 3) -> Dict[str, Any]:
+    def rag_chat(self, query: str, n_results: int = 3) -> Dict[str, Any]:
         """
         RAG 기반 채팅 - 검색된 문서를 참조하여 LLM이 답변 생성
         
@@ -563,7 +563,7 @@ class RAGSystem:
             logger.info(f"RAG 채팅 시작: '{query}'")
             
             # 1. 관련 문서 검색
-            search_results = await self.search(query, n_results=n_results)
+            search_results = self.search(query, n_results=n_results)
             
             if not search_results:
                 return {
@@ -615,7 +615,7 @@ class RAGSystem:
             )
             
             # 5. LLM 답변 생성
-            answer = await rag_chain.ainvoke({
+            answer = rag_chain.invoke({
                 "context": context,
                 "question": query
             })
@@ -658,7 +658,7 @@ class RAGSystem:
                 "message": "관련 문서를 검색하는 중..."
             }
             
-            search_results = await self.search(query, n_results=n_results)
+            search_results = self.search(query, n_results=n_results)
             
             if not search_results:
                 yield {
@@ -776,12 +776,12 @@ async def main():
     # 테스트 PDF 파일이 있다면 처리
     test_pdf = "test.pdf"
     if os.path.exists(test_pdf):
-        success = await rag_system.process_pdf(test_pdf)
+        success = rag_system.process_pdf(test_pdf)
         if success:
             print("PDF 처리 성공!")
             
             # 검색 테스트
-            results = await rag_system.search("테스트 쿼리")
+            results = rag_system.search("테스트 쿼리")
             print(f"검색 결과: {len(results)}개")
             for result in results:
                 print(f"- {result['text'][:100]}...")

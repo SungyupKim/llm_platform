@@ -57,3 +57,20 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# ChromaDB - 벡터 데이터베이스 (개인정보 포함 가능)
+chroma_db/
+*.chroma
+chroma/
+chromadb/
+vector_db/
+embeddings/
+
+# PDF files - 업로드된 문서들 (개인정보 포함 가능)
+uploads/
+documents/
+*.pdf
+
+# Application logs and data
+app.log
+*.log

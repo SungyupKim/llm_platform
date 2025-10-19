@@ -4,7 +4,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
-from bedrock_client import bedrock_client
+from langchain_aws import ChatBedrock
 from mcp_client import mcp_client
 from config import Config
 import json
@@ -31,7 +31,10 @@ class StreamingAgent:
     """Streaming-enabled agent with real-time progress updates using LangGraph"""
     
     def __init__(self):
-        self.llm = bedrock_client.get_llm()
+        self.llm = ChatBedrock(
+            model_id=Config.BEDROCK_MODEL_ID,
+            **Config.get_aws_config()
+        )
         
         # Tools will be loaded dynamically from MCP servers
         self.tools = []
@@ -245,6 +248,38 @@ class StreamingAgent:
                 get_current_db_tool.__name__ = tool_name
                 get_current_db_tool.__doc__ = tool_description
                 langchain_tool = tool(get_current_db_tool)
+            elif tool_name == "rag_upload_pdf":
+                # Create rag_upload_pdf tool with explicit parameters
+                def rag_upload_tool(pdf_data: str, filename: str, metadata: dict = None) -> str:
+                    return tool_func(pdf_data=pdf_data, filename=filename, metadata=metadata or {})
+                
+                rag_upload_tool.__name__ = tool_name
+                rag_upload_tool.__doc__ = tool_description
+                langchain_tool = tool(rag_upload_tool)
+            elif tool_name == "rag_search":
+                # Create rag_search tool with explicit parameters
+                def rag_search_tool(query: str, n_results: int = 5) -> str:
+                    return tool_func(query=query, n_results=n_results)
+                
+                rag_search_tool.__name__ = tool_name
+                rag_search_tool.__doc__ = tool_description
+                langchain_tool = tool(rag_search_tool)
+            elif tool_name == "rag_chat":
+                # Create rag_chat tool with explicit parameters
+                def rag_chat_tool(question: str, n_results: int = 3) -> str:
+                    return tool_func(question=question, n_results=n_results)
+                
+                rag_chat_tool.__name__ = tool_name
+                rag_chat_tool.__doc__ = tool_description
+                langchain_tool = tool(rag_chat_tool)
+            elif tool_name == "rag_get_info":
+                # Create rag_get_info tool with no parameters
+                def rag_info_tool() -> str:
+                    return tool_func()
+                
+                rag_info_tool.__name__ = tool_name
+                rag_info_tool.__doc__ = tool_description
+                langchain_tool = tool(rag_info_tool)
             else:
                 # Create the tool with proper schema for other tools
                 langchain_tool = tool(tool_func)
@@ -389,6 +424,12 @@ Examples:
 - "10 더하기 5" -> YES (needs add tool)
 - "7 곱하기 8" -> YES (needs multiply tool)
 - "20 나누기 4" -> YES (needs divide tool)
+- "Upload PDF document" -> YES (needs rag_upload_pdf tool)
+- "Search documents" -> YES (needs rag_search tool)
+- "Ask about documents" -> YES (needs rag_chat tool)
+- "PDF 업로드" -> YES (needs rag_upload_pdf tool)
+- "문서 검색" -> YES (needs rag_search tool)
+- "문서 질문" -> YES (needs rag_chat tool)
 - "What is the weather?" -> NO (direct response)
 - "Hello, how are you?" -> NO (direct response)
 - "Database table list" -> YES (needs query tool with SQL)
@@ -417,7 +458,9 @@ Examples:
             needs_tools = any(keyword in user_lower for keyword in [
                 "list", "ls", "directory", "files", "read", "write", "create", "search", "find", "query", "database", "sql", 
                 "table", "describe", "structure", "schema", "employee", "select", "show", "display",
-                "디렉토리", "파일", "리스트", "목록", "보여줘", "보여주세요", "읽기", "쓰기", "검색", "찾기", "조회", "데이터베이스"
+                "upload", "pdf", "document", "rag", "chat", "ask", "question", "answer",
+                "디렉토리", "파일", "리스트", "목록", "보여줘", "보여주세요", "읽기", "쓰기", "검색", "찾기", "조회", "데이터베이스",
+                "업로드", "문서", "PDF", "질문", "답변", "채팅"
             ])
             state["needs_tools"] = needs_tools
             logger.info(f"🔍 Fallback analysis: needs_tools = {needs_tools}")
@@ -488,13 +531,22 @@ For calculator operations, use the appropriate tools:
 - multiply: Multiply two numbers together - Use multiply(a=7, b=8) for "7 × 8"
 - divide: Divide first number by second number - Use divide(a=20, b=4) for "20 ÷ 4"
 
+For RAG (Retrieval-Augmented Generation) operations, use the appropriate tools:
+- rag_upload_pdf: Upload and process PDF files - Use rag_upload_pdf(pdf_data="base64_data", filename="document.pdf", metadata={{"title": "문서제목"}})
+- rag_search: Search for relevant documents - Use rag_search(query="검색어", n_results=5)
+- rag_chat: Ask questions about uploaded documents - Use rag_chat(question="질문", n_results=3)
+- rag_get_info: Get RAG system information - Use rag_get_info()
+
 IMPORTANT: 
 1. For database list requests, use list_databases()
 2. For table list requests, use list_tables(database="database_name")
 3. For table structure requests, use describe_table(table_name="table_name", database="database_name")
 4. For calculation requests, use the appropriate calculator tool (add, multiply, divide)
-5. Always specify the database parameter when available
-6. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
+5. For document upload requests, use rag_upload_pdf with base64 encoded PDF data
+6. For document search requests, use rag_search with appropriate query
+7. For questions about documents, use rag_chat to get AI-powered answers
+8. Always specify the database parameter when available
+9. "No tables found in the database." is a NORMAL response, not an error. It simply means the database is empty.
 
 Always provide the exact tool calls needed for the user's request."""
 

@@ -23,13 +23,6 @@ class Config:
             "command": "npx",
             "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/ubuntu/llm_agent"]
         },
-        "brave-search": {
-            "command": "npx", 
-            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-            "env": {
-                "BRAVE_API_KEY": "your_brave_api_key_here"
-            }
-        },
         "postgres": {
             "command": "/home/ubuntu/venv/bin/python",
             "args": ["/home/ubuntu/llm_agent/multi_db_postgres_mcp.py"],
@@ -46,6 +39,15 @@ class Config:
             "args": ["/home/ubuntu/llm_agent/multi_db_mysql_mcp.py"],
             "env": {
                 "MYSQL_CONNECTION_STRING": os.getenv("MYSQL_CONNECTION_STRING", "mysql://test:test@localhost:3306/test")
+            }
+        },
+        "rag": {
+            "command": "/home/ubuntu/venv/bin/python",
+            "args": ["/home/ubuntu/llm_agent/rag_mcp.py"],
+            "env": {
+                "AWS_REGION": os.getenv("AWS_REGION", "ap-northeast-2"),
+                "AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID", ""),
+                "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY", "")
             }
         }
     }

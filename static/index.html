@@ -61,17 +61,20 @@
             word-wrap: break-word;
         }
         .chat-input {
-            display: flex;
             padding: 20px;
         }
-        .chat-input input {
+        .input-row {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .input-row input {
             flex: 1;
             padding: 12px;
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 16px;
         }
-        .chat-input button {
+        .input-row button {
             margin-left: 10px;
             padding: 12px 24px;
             background: #007bff;
@@ -81,12 +84,39 @@
             cursor: pointer;
             font-size: 16px;
         }
-        .chat-input button:hover {
+        .input-row button:hover {
             background: #0056b3;
         }
-        .chat-input button:disabled {
+        .input-row button:disabled {
             background: #6c757d;
             cursor: not-allowed;
+        }
+        .file-upload-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .file-upload-row button {
+            padding: 8px 16px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .file-upload-row button:hover {
+            background: #218838;
+        }
+        .file-status {
+            font-size: 14px;
+            color: #666;
+        }
+        .file-status.success {
+            color: #28a745;
+        }
+        .file-status.error {
+            color: #dc3545;
         }
         .typing-indicator {
             color: #666;
@@ -127,14 +157,23 @@
                     <li>File system operations (list files, read files)</li>
                     <li>Database queries (list tables, describe tables)</li>
                     <li>Web search</li>
+                    <li>PDF document upload and analysis</li>
+                    <li>Document search and Q&A</li>
                 </ul>
                 How can I assist you today?
             </div>
         </div>
         
         <div class="chat-input">
-            <input type="text" id="messageInput" placeholder="Type your message here..." onkeypress="handleKeyPress(event)">
-            <button id="sendButton" onclick="sendMessage()">Send</button>
+            <div class="input-row">
+                <input type="text" id="messageInput" placeholder="Type your message here..." onkeypress="handleKeyPress(event)">
+                <button id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+            <div class="file-upload-row">
+                <input type="file" id="fileInput" accept=".pdf" style="display: none;" onchange="handleFileSelect(event)">
+                <button id="uploadButton" onclick="document.getElementById('fileInput').click()">📎 Upload PDF</button>
+                <span id="fileStatus" class="file-status"></span>
+            </div>
         </div>
     </div>
 
@@ -142,6 +181,9 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        const fileInput = document.getElementById('fileInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const fileStatus = document.getElementById('fileStatus');
         
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
@@ -266,6 +308,72 @@
                 sendButton.disabled = false;
                 sendButton.textContent = 'Send';
                 messageInput.focus();
+            }
+        }
+        
+        // File upload handling
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                fileStatus.textContent = '❌ PDF 파일만 업로드 가능합니다.';
+                fileStatus.className = 'file-status error';
+                return;
+            }
+            
+            if (file.size > 10 * 1024 * 1024) { // 10MB limit
+                fileStatus.textContent = '❌ 파일 크기는 10MB를 초과할 수 없습니다.';
+                fileStatus.className = 'file-status error';
+                return;
+            }
+            
+            fileStatus.textContent = `📄 ${file.name} 선택됨 (${(file.size / 1024 / 1024).toFixed(2)}MB)`;
+            fileStatus.className = 'file-status';
+            
+            // Auto-upload the file
+            uploadFile(file);
+        }
+        
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fileStatus.textContent = '⏳ 업로드 중...';
+            fileStatus.className = 'file-status';
+            uploadButton.disabled = true;
+            
+            try {
+                const response = await fetch('/chat/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    fileStatus.textContent = `✅ ${file.name} 업로드 완료!`;
+                    fileStatus.className = 'file-status success';
+                    
+                    // Add success message to chat
+                    addMessage(`<strong>📄 파일 업로드:</strong> ${file.name}이 성공적으로 업로드되고 처리되었습니다. 이제 이 문서에 대해 질문할 수 있습니다!`, 'assistant');
+                } else {
+                    throw new Error(result.error || '업로드 실패');
+                }
+                
+            } catch (error) {
+                fileStatus.textContent = `❌ 업로드 실패: ${error.message}`;
+                fileStatus.className = 'file-status error';
+                
+                // Add error message to chat
+                addMessage(`<strong>❌ 파일 업로드 오류:</strong> ${error.message}`, 'assistant');
+            } finally {
+                uploadButton.disabled = false;
+                fileInput.value = ''; // Clear file input
             }
         }
         

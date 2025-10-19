@@ -221,7 +221,8 @@ async def search_documents(query: str, n_results: int = 5) -> str:
         
         for i, result in enumerate(results, 1):
             response += f"**결과 {i}:**\n"
-            response += f"문서: {result['metadata'].get('filename', 'Unknown')}\n"
+            metadata = result.get('metadata', {})
+            response += f"문서: {metadata.get('filename', 'Unknown')}\n"
             response += f"내용: {result['text'][:200]}...\n"
             response += f"유사도: {1 - result['distance']:.3f}\n\n"
         
@@ -248,7 +249,8 @@ async def chat_with_documents(question: str, n_results: int = 3) -> str:
         if result['sources']:
             response += "📚 참조 문서:\n"
             for i, source in enumerate(result['sources'], 1):
-                filename = source['metadata'].get('filename', 'Unknown')
+                metadata = source.get('metadata', {})
+                filename = metadata.get('filename', 'Unknown')
                 response += f"{i}. {filename}\n"
         
         return response

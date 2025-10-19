@@ -430,6 +430,12 @@ Examples:
 - "PDF 업로드" -> YES (needs rag_upload_pdf tool)
 - "문서 검색" -> YES (needs rag_search tool)
 - "문서 질문" -> YES (needs rag_chat tool)
+- "Who is John Doe?" -> YES (needs rag_chat tool to check documents)
+- "Tell me about 김성엽" -> YES (needs rag_chat tool to check documents)
+- "What is machine learning?" -> YES (needs rag_chat tool to check documents)
+- "김성엽은 누구인가요?" -> YES (needs rag_chat tool to check documents)
+- "회사 소개해줘" -> YES (needs rag_chat tool to check documents)
+- "프로젝트에 대해 알려줘" -> YES (needs rag_chat tool to check documents)
 - "What is the weather?" -> NO (direct response)
 - "Hello, how are you?" -> NO (direct response)
 - "Database table list" -> YES (needs query tool with SQL)
@@ -458,9 +464,9 @@ Examples:
             needs_tools = any(keyword in user_lower for keyword in [
                 "list", "ls", "directory", "files", "read", "write", "create", "search", "find", "query", "database", "sql", 
                 "table", "describe", "structure", "schema", "employee", "select", "show", "display",
-                "upload", "pdf", "document", "rag", "chat", "ask", "question", "answer",
+                "upload", "pdf", "document", "rag", "chat", "ask", "question", "answer", "who", "what", "tell", "about",
                 "디렉토리", "파일", "리스트", "목록", "보여줘", "보여주세요", "읽기", "쓰기", "검색", "찾기", "조회", "데이터베이스",
-                "업로드", "문서", "PDF", "질문", "답변", "채팅"
+                "업로드", "문서", "PDF", "질문", "답변", "채팅", "누구", "무엇", "알려줘", "소개", "설명", "에 대해"
             ])
             state["needs_tools"] = needs_tools
             logger.info(f"🔍 Fallback analysis: needs_tools = {needs_tools}")
@@ -536,6 +542,14 @@ For RAG (Retrieval-Augmented Generation) operations, use the appropriate tools:
 - rag_search: Search for relevant documents - Use rag_search(query="검색어", n_results=5)
 - rag_chat: Ask questions about uploaded documents - Use rag_chat(question="질문", n_results=3)
 - rag_get_info: Get RAG system information - Use rag_get_info()
+
+IMPORTANT RAG USAGE GUIDELINES:
+1. ALWAYS try to use rag_chat first when users ask questions about people, topics, or information that might be in uploaded documents
+2. Use rag_chat for questions like "Who is [person name]?", "Tell me about [topic]", "What is [concept]?", etc.
+3. Use rag_search when users want to find specific documents or information
+4. Use rag_upload_pdf when users want to upload documents
+5. If rag_chat doesn't find relevant information, then provide a general response
+6. For any question about a person, company, or topic, ALWAYS check if there's relevant information in the document database first
 
 IMPORTANT: 
 1. For database list requests, use list_databases()

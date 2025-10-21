@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # MySQL 데이터베이스
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: test
+      MYSQL_USER: test
+      MYSQL_PASSWORD: test
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - mcp_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mcp_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL MCP 서버
+  mysql-mcp:
+    build: ./mysql-mcp
+    container_name: mysql_mcp_server
+    environment:
+      MYSQL_CONNECTION_STRING: mysql://test:test@mysql:3306/test
+    ports:
+      - "8012:8012"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - mcp_network
+    restart: unless-stopped
+
+  # PostgreSQL MCP 서버
+  postgres-mcp:
+    build: ./postgres-mcp
+    container_name: postgres_mcp_server
+    environment:
+      POSTGRES_CONNECTION_STRING: postgresql://test:test@postgres:5432/test
+    ports:
+      - "8011:8011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mcp_network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  postgres_data:
+
+networks:
+  mcp_network:
+    driver: bridge

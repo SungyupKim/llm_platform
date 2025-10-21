@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # MySQL MCP 서버 (호스트의 MySQL 데이터베이스 연결)
+  mysql-mcp:
+    build: ./mysql-mcp
+    container_name: mysql_mcp_server
+    environment:
+      MYSQL_CONNECTION_STRING: mysql://test:test@host.docker.internal:3306/test
+    ports:
+      - "8012:8012"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # PostgreSQL MCP 서버 (호스트의 PostgreSQL 데이터베이스 연결)
+  postgres-mcp:
+    build: ./postgres-mcp
+    container_name: postgres_mcp_server
+    environment:
+      POSTGRES_CONNECTION_STRING: postgresql://test:test@host.docker.internal:5432/test
+    ports:
+      - "8011:8011"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
